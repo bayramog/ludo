@@ -53,6 +53,9 @@ service, enable startup, or change persistent background behavior in advance.
 F3-03 depends on that choice. Path, lock, profile and packaging preparation do
 not require deciding it.
 
+[LIFECYCLE-DECISION.md](LIFECYCLE-DECISION.md) records the source observations,
+three alternatives and the live evidence required before that choice.
+
 ## Codebase findings and implementation boundaries
 
 Baseline: fork `dev` at `2388ed4d56d8d8ff04c6252c7c3d87174a3b8d55`, merged

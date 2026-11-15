@@ -29,7 +29,7 @@ were installed from beta.33's lockfile using `npm ci` in this worktree.
 | Engine, `bash engine/tests/run.sh` with isolated user roots | 57 of 63 script files passed; 6 failed below |
 | Desktop `npm run typecheck` | Passed |
 | Desktop `npm run build` | Passed, Vite 8.3.4; existing chunk/config-loader warnings |
-| Desktop built-dist test suite | Running when this record was created; see subsequent evidence update |
+| Desktop built-dist test suite | 100 passed, 0 failed/skipped, 359.61 s |
 
 The six engine failures are baseline platform limitations, not suppressed
 checks. They remain tracked by F0-02, F1-03 and F1-04:
@@ -66,9 +66,17 @@ the current OAuth credential lacks the `workflow` scope. The source changes
 were published separately using existing permission. Authorization to extend
 the scope is pending; no Windows CI pass is claimed.
 
-Existing Linux/Decky CI was explicitly dispatched on the paths branch. Live
-Windows 11 desktop/handheld acceptance, Windows packaging, frontend lifecycle
-and all emulator round trips remain open program work.
+Existing Linux/Decky CI was explicitly dispatched on the paths branch. On the
+final code commit `7a044ccb45a6fdb85d92251fef5134cf6d22049f`, the
+[Linux CI run](https://github.com/bayramog/ludo/actions/runs/43737852064) passed
+all 64 engine script files (including `test_windows_paths.py`), 173 backend
+tests (37.41 s), Decky typecheck, and desktop typecheck/build/render tests.
+The run completed successfully with all three jobs passing. The earlier run on
+`e729ca3` was cancelled by workflow
+concurrency after the newer commit's run started; it is not an overall pass.
+
+Live Windows 11 desktop/handheld acceptance, Windows packaging, frontend
+lifecycle and all emulator round trips remain open program work.
 
 ## Reproducibility and limits
 

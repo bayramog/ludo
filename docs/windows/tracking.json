@@ -1001,5 +1001,15 @@
       "number": 244,
       "url": "https://github.com/bayramog/ludo/issues/244"
     }
+  },
+  "pull_requests": {
+    "baseline": {
+      "number": 245,
+      "url": "https://github.com/bayramog/ludo/pull/245"
+    },
+    "paths": {
+      "number": 246,
+      "url": "https://github.com/bayramog/ludo/pull/246"
+    }
   }
 }
