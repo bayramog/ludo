@@ -93,7 +93,7 @@ class PathSettingsTests(unittest.TestCase):
     def test_unicode_credentials_and_paths_round_trip_in_new_process(self):
         settings = SettingsManager()
         settings.set('RomM', 'client_token', 'test-only-öğ-token')
-        settings.set('Download', 'rom_directory', str(self.home / 'ROM arşivi'))
+        settings.set('Download', 'rom_directory', str(self.home / 'ROM arşivi %50'))
         self.assertNotIn('test-only-öğ-token', settings.config_file.read_text(encoding='utf-8'))
         code = """
 import sys
@@ -106,7 +106,7 @@ assert s.get('RomM', 'client_token') == 'test-only-öğ-token'
 assert s.get('Download', 'rom_directory') == sys.argv[2]
 """
         result = subprocess.run([sys.executable, '-c', code, str(ENGINE),
-                                 str(self.home / 'ROM arşivi')], capture_output=True, text=True)
+                                 str(self.home / 'ROM arşivi %50')], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_settings_does_not_require_fchmod(self):

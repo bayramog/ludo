@@ -1741,7 +1741,9 @@ class SettingsManager:
                 if self._file_changed():
                     self.load_settings()
                 return
-            self.config = configparser.ConfigParser()
+            # Settings are literal values, not a template language. A valid
+            # path or URL containing '%' must survive set/load unchanged.
+            self.config = configparser.ConfigParser(interpolation=None)
             SettingsManager._shared[str(self.config_file)] = self.config
             self.load_settings()
 
