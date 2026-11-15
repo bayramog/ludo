@@ -1,7 +1,7 @@
 import { Focusable, GamepadButton, ModalRoot, showModal, Navigation } from "@ludo/host";
 import { toaster } from "../toast";
 import { V2, DEVICE_COLORS, fmtBytes, fmtPlayTime, fmtReleaseDate, formatEta, formatSpeed } from "../theme";
-import { FaWrench, FaChevronDown, FaChevronRight, FaBookmark, FaBoxOpen, FaCheckCircle, FaClock, FaClone, FaCloudUploadAlt, FaCopy, FaDownload, FaFolder, FaLayerGroup, FaPlay, FaPuzzlePiece, FaRedo, FaSync, FaTimes, FaTrash, FaUndo, FaUnlink, FaExclamationTriangle, FaExternalLinkAlt, FaLink, FaMicrochip, FaUsers, FaBook, FaImages} from "react-icons/fa";
+import { FaBan, FaWrench, FaChevronDown, FaChevronRight, FaBookmark, FaBoxOpen, FaCheckCircle, FaClock, FaClone, FaCloudUploadAlt, FaCopy, FaDownload, FaFolder, FaLayerGroup, FaPlay, FaPuzzlePiece, FaRedo, FaSync, FaTimes, FaTrash, FaUndo, FaUnlink, FaExclamationTriangle, FaExternalLinkAlt, FaLink, FaMicrochip, FaUsers, FaBook, FaImages} from "react-icons/fa";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { V2Focus, V2_FOCUS_STYLE, v2Page } from "../focus";
 import { peekDetail, storeDetail } from "../detailcache";
@@ -2047,7 +2047,10 @@ export function GameDetailPage() {
           {/* Entered from anywhere (Up from the tabs), focus lands on the
               primary action — Play/Download — never on Delete beside it. */}
           <Focusable noFocusRing flow-children="horizontal" {...NAV_ENTER_FIRST} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-            {!isDownloaded ? (
+            {!isDownloaded && detail?.no_server_file ? (
+              <GameActionButton variant="emphasized" focusRef={ctaRef} disabled label="No file" icon={<FaBan size={15} />}
+                onClick={() => {}} />
+            ) : !isDownloaded ? (
               <GameActionButton variant="emphasized" focusRef={ctaRef} disabled={!!busy || downloading} onClick={doDownload}
                 progress={downloading ? (dlProg?.exact ?? dlPct ?? 0) : undefined}
                 label={downloading

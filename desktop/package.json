@@ -1,7 +1,7 @@
 {
   "name": "ludo-desktop",
   "private": true,
-  "version": "1.0.0-beta.29",
+  "version": "1.0.0-beta.33",
   "type": "module",
   "description": "Desktop client — Access your RomM library and sync your saves and states between RomM and RetroArch",
   "main": "electron/main.cjs",
@@ -32,12 +32,13 @@
     "react-dom": "^18.3.1",
     "react-icons": "^5.7.0",
     "typescript": "^5.6.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.4"
   },
   "allowScripts": {
     "electron@39.8.10": true
   },
   "build": {
+    "afterPack": "tools/after-pack.cjs",
     "appId": "io.github.covin90.ludo",
     "productName": "Ludo",
     "artifactName": "Ludo-v${version}-x86_64.AppImage",

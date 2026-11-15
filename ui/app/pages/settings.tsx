@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { applyAppImageUpdate, getPlayTime, setMostPlayedHome, checkForUpdate, clearRecentActivity, downloadUpdate, enablePlatform, refreshFromRomm, deleteOrphanGame, getAccountUsername, getCheckOnStartup, getConfig, getFetchBenchmark, getLibraryAutoUpdate, getLoggingEnabled, getOrphanGames, getPlatformSync, getPluginVersion, getRecentActivity, getResumeStateEnabled, getRetrodeckButtonEnabled, getSteamTileStatus, getUpdateChannel, getVirtualCollectionsVisible, getScreenshotMode, setScreenshotModeRpc, isDebugMode, logout, rebuildLibrary, setCheckOnStartup, setLibraryAutoUpdate, setResumeStateEnabled, setRetrodeckButtonEnabled, setSteamTile, setSyncIndicatorRpc, setUpdateChannel, setVirtualCollectionsVisibleRpc, timeColdFetch, updateLoggingEnabled, getSyncIndicator} from "../rpc";
+import { getRegionOrder } from "../rpc";
 import { GameActionButton, UpdateActionBtn, V2Button, V2Segment, V2SettingsRow, V2SettingsSection, V2Switch, _gameLabel, V2CardRow, RSwitchTrack} from "../kit";
 import { V2, fmtAgo, fmtBytes, fmtPlayTime } from "../theme";
-import { FaBell, FaBookmark, FaBug, FaCameraRetro, FaCheck, FaCheckCircle, FaChevronDown, FaChevronLeft, FaChevronRight, FaClock, FaCloudUploadAlt, FaDownload, FaExternalLinkAlt, FaGithub, FaHistory, FaLayerGroup, FaPlay, FaRedo, FaRegWindowMaximize, FaStopwatch, FaSync, FaTimes, FaTimesCircle, FaTrash, FaUndo, FaWifi, FaExclamationTriangle, FaSave, FaUser} from "react-icons/fa";
+import { FaGlobe, FaBell, FaBookmark, FaBug, FaCameraRetro, FaCheck, FaCheckCircle, FaChevronDown, FaChevronLeft, FaChevronRight, FaClock, FaCloudUploadAlt, FaDownload, FaExternalLinkAlt, FaGithub, FaHistory, FaLayerGroup, FaPlay, FaRedo, FaRegWindowMaximize, FaStopwatch, FaSync, FaTimes, FaTimesCircle, FaTrash, FaUndo, FaWifi, FaExclamationTriangle, FaSave, FaUser} from "react-icons/fa";
 import { Focusable, Navigation, host } from "@ludo/host";
 import { toaster, notificationPrefs, saveNotificationPrefs, loadNotificationPrefs } from "../toast";
 import { useAutoFocus } from "../shell";
@@ -489,6 +490,14 @@ export function SettingsPage() {
   // is destroyed, but it costs a full walk of the server, so it must not
   // happen on one stray press.
   const [refetchArmed, setRefetchArmed] = useState(false);
+  const [regionSummary, setRegionSummary] = useState('Which version a game opens with.');
+  useEffect(() => {
+    getRegionOrder().then((r: any) => {
+      if (!r?.success) return;
+      const shown = (r.follow ? r.server : r.order).slice(0, 4).join(', ');
+      if (shown) setRegionSummary(`${r.follow ? 'Following RomM' : 'This device'}: ${shown}`);
+    }).catch(() => { });
+  }, []);
   const [refetching, setRefetching] = useState(false);
   useEffect(() => {
     if (!refetchArmed) return;
@@ -1273,12 +1282,20 @@ export function SettingsPage() {
           />
           <V2CardRow
             divider
-            last
             icon={<FaLayerGroup size={16} />}
             title="Platforms"
             subtitle={platformSummary
               || 'Choose which platforms Ludo syncs.'}
             onClick={() => libNavigate("/romm-sync-platforms")}
+            right={<FaChevronRight size={12} style={{ color: V2.fgFaint }} />}
+          />
+          <V2CardRow
+            divider
+            last
+            icon={<FaGlobe size={16} />}
+            title="Region order"
+            subtitle={regionSummary}
+            onClick={() => libNavigate("/romm-sync-regions")}
             right={<FaChevronRight size={12} style={{ color: V2.fgFaint }} />}
           />
         </div>
