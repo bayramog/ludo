@@ -1,0 +1,1005 @@
+{
+  "schema_version": 1,
+  "repository": "bayramog/ludo",
+  "recorded_on": "2026-11-15",
+  "milestones": {
+    "F0": {
+      "number": 1,
+      "url": "https://github.com/bayramog/ludo/milestone/1"
+    },
+    "F1": {
+      "number": 2,
+      "url": "https://github.com/bayramog/ludo/milestone/2"
+    },
+    "F2": {
+      "number": 3,
+      "url": "https://github.com/bayramog/ludo/milestone/3"
+    },
+    "F3": {
+      "number": 4,
+      "url": "https://github.com/bayramog/ludo/milestone/4"
+    },
+    "F4": {
+      "number": 5,
+      "url": "https://github.com/bayramog/ludo/milestone/5"
+    },
+    "F5": {
+      "number": 6,
+      "url": "https://github.com/bayramog/ludo/milestone/6"
+    }
+  },
+  "issues": {
+    "F0-01": {
+      "number": 2,
+      "url": "https://github.com/bayramog/ludo/issues/2"
+    },
+    "F0-02": {
+      "number": 3,
+      "url": "https://github.com/bayramog/ludo/issues/3"
+    },
+    "F0-03": {
+      "number": 4,
+      "url": "https://github.com/bayramog/ludo/issues/4"
+    },
+    "F0-04": {
+      "number": 5,
+      "url": "https://github.com/bayramog/ludo/issues/5"
+    },
+    "F1-01": {
+      "number": 6,
+      "url": "https://github.com/bayramog/ludo/issues/6"
+    },
+    "F1-02": {
+      "number": 7,
+      "url": "https://github.com/bayramog/ludo/issues/7"
+    },
+    "F1-04": {
+      "number": 8,
+      "url": "https://github.com/bayramog/ludo/issues/8"
+    },
+    "F2-01": {
+      "number": 9,
+      "url": "https://github.com/bayramog/ludo/issues/9"
+    },
+    "F1-03": {
+      "number": 10,
+      "url": "https://github.com/bayramog/ludo/issues/10"
+    },
+    "F1-06": {
+      "number": 11,
+      "url": "https://github.com/bayramog/ludo/issues/11"
+    },
+    "F2-02": {
+      "number": 12,
+      "url": "https://github.com/bayramog/ludo/issues/12"
+    },
+    "F3-01": {
+      "number": 13,
+      "url": "https://github.com/bayramog/ludo/issues/13"
+    },
+    "F4-01": {
+      "number": 14,
+      "url": "https://github.com/bayramog/ludo/issues/14"
+    },
+    "F1-05": {
+      "number": 15,
+      "url": "https://github.com/bayramog/ludo/issues/15"
+    },
+    "F2-03": {
+      "number": 16,
+      "url": "https://github.com/bayramog/ludo/issues/16"
+    },
+    "F2-04": {
+      "number": 17,
+      "url": "https://github.com/bayramog/ludo/issues/17"
+    },
+    "F4-02": {
+      "number": 18,
+      "url": "https://github.com/bayramog/ludo/issues/18"
+    },
+    "F4-03": {
+      "number": 19,
+      "url": "https://github.com/bayramog/ludo/issues/19"
+    },
+    "CORE-81": {
+      "number": 20,
+      "url": "https://github.com/bayramog/ludo/issues/20"
+    },
+    "CORE-DoubleCherryGB": {
+      "number": 21,
+      "url": "https://github.com/bayramog/ludo/issues/21"
+    },
+    "CORE-a5200": {
+      "number": 22,
+      "url": "https://github.com/bayramog/ludo/issues/22"
+    },
+    "CORE-amiarcadia": {
+      "number": 23,
+      "url": "https://github.com/bayramog/ludo/issues/23"
+    },
+    "CORE-amiberry": {
+      "number": 24,
+      "url": "https://github.com/bayramog/ludo/issues/24"
+    },
+    "CORE-applewin": {
+      "number": 25,
+      "url": "https://github.com/bayramog/ludo/issues/25"
+    },
+    "CORE-ardens": {
+      "number": 26,
+      "url": "https://github.com/bayramog/ludo/issues/26"
+    },
+    "CORE-arduous": {
+      "number": 27,
+      "url": "https://github.com/bayramog/ludo/issues/27"
+    },
+    "CORE-atari800": {
+      "number": 28,
+      "url": "https://github.com/bayramog/ludo/issues/28"
+    },
+    "CORE-azahar": {
+      "number": 29,
+      "url": "https://github.com/bayramog/ludo/issues/29"
+    },
+    "CORE-b2": {
+      "number": 30,
+      "url": "https://github.com/bayramog/ludo/issues/30"
+    },
+    "CORE-bk": {
+      "number": 31,
+      "url": "https://github.com/bayramog/ludo/issues/31"
+    },
+    "CORE-bluemsx": {
+      "number": 32,
+      "url": "https://github.com/bayramog/ludo/issues/32"
+    },
+    "CORE-bsnes": {
+      "number": 33,
+      "url": "https://github.com/bayramog/ludo/issues/33"
+    },
+    "CORE-bsnes-jg": {
+      "number": 34,
+      "url": "https://github.com/bayramog/ludo/issues/34"
+    },
+    "CORE-bsnes_hd_beta": {
+      "number": 35,
+      "url": "https://github.com/bayramog/ludo/issues/35"
+    },
+    "CORE-cap32": {
+      "number": 36,
+      "url": "https://github.com/bayramog/ludo/issues/36"
+    },
+    "CORE-crocods": {
+      "number": 37,
+      "url": "https://github.com/bayramog/ludo/issues/37"
+    },
+    "CORE-desmume": {
+      "number": 38,
+      "url": "https://github.com/bayramog/ludo/issues/38"
+    },
+    "CORE-desmume2015": {
+      "number": 39,
+      "url": "https://github.com/bayramog/ludo/issues/39"
+    },
+    "CORE-dice": {
+      "number": 40,
+      "url": "https://github.com/bayramog/ludo/issues/40"
+    },
+    "CORE-dolphin": {
+      "number": 41,
+      "url": "https://github.com/bayramog/ludo/issues/41"
+    },
+    "CORE-dosbox_pure": {
+      "number": 42,
+      "url": "https://github.com/bayramog/ludo/issues/42"
+    },
+    "CORE-emuscv": {
+      "number": 43,
+      "url": "https://github.com/bayramog/ludo/issues/43"
+    },
+    "CORE-ep128emu_core": {
+      "number": 44,
+      "url": "https://github.com/bayramog/ludo/issues/44"
+    },
+    "CORE-fbalpha": {
+      "number": 45,
+      "url": "https://github.com/bayramog/ludo/issues/45"
+    },
+    "CORE-fbalpha2012": {
+      "number": 46,
+      "url": "https://github.com/bayramog/ludo/issues/46"
+    },
+    "CORE-fbalpha2012_cps1": {
+      "number": 47,
+      "url": "https://github.com/bayramog/ludo/issues/47"
+    },
+    "CORE-fbalpha2012_cps2": {
+      "number": 48,
+      "url": "https://github.com/bayramog/ludo/issues/48"
+    },
+    "CORE-fbalpha2012_cps3": {
+      "number": 49,
+      "url": "https://github.com/bayramog/ludo/issues/49"
+    },
+    "CORE-fbalpha2012_neogeo": {
+      "number": 50,
+      "url": "https://github.com/bayramog/ludo/issues/50"
+    },
+    "CORE-fbneo": {
+      "number": 51,
+      "url": "https://github.com/bayramog/ludo/issues/51"
+    },
+    "CORE-fceumm": {
+      "number": 52,
+      "url": "https://github.com/bayramog/ludo/issues/52"
+    },
+    "CORE-flycast": {
+      "number": 53,
+      "url": "https://github.com/bayramog/ludo/issues/53"
+    },
+    "CORE-freechaf": {
+      "number": 54,
+      "url": "https://github.com/bayramog/ludo/issues/54"
+    },
+    "CORE-freeintv": {
+      "number": 55,
+      "url": "https://github.com/bayramog/ludo/issues/55"
+    },
+    "CORE-freej2me": {
+      "number": 56,
+      "url": "https://github.com/bayramog/ludo/issues/56"
+    },
+    "CORE-frodo": {
+      "number": 57,
+      "url": "https://github.com/bayramog/ludo/issues/57"
+    },
+    "CORE-fuse": {
+      "number": 58,
+      "url": "https://github.com/bayramog/ludo/issues/58"
+    },
+    "CORE-gambatte": {
+      "number": 59,
+      "url": "https://github.com/bayramog/ludo/issues/59"
+    },
+    "CORE-gearcoleco": {
+      "number": 60,
+      "url": "https://github.com/bayramog/ludo/issues/60"
+    },
+    "CORE-geargrafx": {
+      "number": 61,
+      "url": "https://github.com/bayramog/ludo/issues/61"
+    },
+    "CORE-gearsystem": {
+      "number": 62,
+      "url": "https://github.com/bayramog/ludo/issues/62"
+    },
+    "CORE-genesis_plus_gx": {
+      "number": 63,
+      "url": "https://github.com/bayramog/ludo/issues/63"
+    },
+    "CORE-genesis_plus_gx_expanded": {
+      "number": 64,
+      "url": "https://github.com/bayramog/ludo/issues/64"
+    },
+    "CORE-genesis_plus_gx_wide": {
+      "number": 65,
+      "url": "https://github.com/bayramog/ludo/issues/65"
+    },
+    "CORE-geolith": {
+      "number": 66,
+      "url": "https://github.com/bayramog/ludo/issues/66"
+    },
+    "CORE-gpsp": {
+      "number": 67,
+      "url": "https://github.com/bayramog/ludo/issues/67"
+    },
+    "CORE-gw": {
+      "number": 68,
+      "url": "https://github.com/bayramog/ludo/issues/68"
+    },
+    "CORE-handy": {
+      "number": 69,
+      "url": "https://github.com/bayramog/ludo/issues/69"
+    },
+    "CORE-hatari": {
+      "number": 70,
+      "url": "https://github.com/bayramog/ludo/issues/70"
+    },
+    "CORE-hatarib": {
+      "number": 71,
+      "url": "https://github.com/bayramog/ludo/issues/71"
+    },
+    "CORE-holani": {
+      "number": 72,
+      "url": "https://github.com/bayramog/ludo/issues/72"
+    },
+    "CORE-jollycv": {
+      "number": 73,
+      "url": "https://github.com/bayramog/ludo/issues/73"
+    },
+    "CORE-kronos": {
+      "number": 74,
+      "url": "https://github.com/bayramog/ludo/issues/74"
+    },
+    "CORE-m2000": {
+      "number": 75,
+      "url": "https://github.com/bayramog/ludo/issues/75"
+    },
+    "CORE-mame": {
+      "number": 76,
+      "url": "https://github.com/bayramog/ludo/issues/76"
+    },
+    "CORE-mame2000": {
+      "number": 77,
+      "url": "https://github.com/bayramog/ludo/issues/77"
+    },
+    "CORE-mame2003": {
+      "number": 78,
+      "url": "https://github.com/bayramog/ludo/issues/78"
+    },
+    "CORE-mame2003_midway": {
+      "number": 79,
+      "url": "https://github.com/bayramog/ludo/issues/79"
+    },
+    "CORE-mame2003_plus": {
+      "number": 80,
+      "url": "https://github.com/bayramog/ludo/issues/80"
+    },
+    "CORE-mame2010": {
+      "number": 81,
+      "url": "https://github.com/bayramog/ludo/issues/81"
+    },
+    "CORE-mame2014": {
+      "number": 82,
+      "url": "https://github.com/bayramog/ludo/issues/82"
+    },
+    "CORE-mame2016": {
+      "number": 83,
+      "url": "https://github.com/bayramog/ludo/issues/83"
+    },
+    "CORE-mednafen_gba": {
+      "number": 84,
+      "url": "https://github.com/bayramog/ludo/issues/84"
+    },
+    "CORE-mednafen_lynx": {
+      "number": 85,
+      "url": "https://github.com/bayramog/ludo/issues/85"
+    },
+    "CORE-mednafen_ngp": {
+      "number": 86,
+      "url": "https://github.com/bayramog/ludo/issues/86"
+    },
+    "CORE-mednafen_pce": {
+      "number": 87,
+      "url": "https://github.com/bayramog/ludo/issues/87"
+    },
+    "CORE-mednafen_pce_fast": {
+      "number": 88,
+      "url": "https://github.com/bayramog/ludo/issues/88"
+    },
+    "CORE-mednafen_pcfx": {
+      "number": 89,
+      "url": "https://github.com/bayramog/ludo/issues/89"
+    },
+    "CORE-mednafen_psx_hw": {
+      "number": 90,
+      "url": "https://github.com/bayramog/ludo/issues/90"
+    },
+    "CORE-mednafen_saturn": {
+      "number": 91,
+      "url": "https://github.com/bayramog/ludo/issues/91"
+    },
+    "CORE-mednafen_snes": {
+      "number": 92,
+      "url": "https://github.com/bayramog/ludo/issues/92"
+    },
+    "CORE-mednafen_supergrafx": {
+      "number": 93,
+      "url": "https://github.com/bayramog/ludo/issues/93"
+    },
+    "CORE-mednafen_vb": {
+      "number": 94,
+      "url": "https://github.com/bayramog/ludo/issues/94"
+    },
+    "CORE-mednafen_wswan": {
+      "number": 95,
+      "url": "https://github.com/bayramog/ludo/issues/95"
+    },
+    "CORE-melonds": {
+      "number": 96,
+      "url": "https://github.com/bayramog/ludo/issues/96"
+    },
+    "CORE-melondsds": {
+      "number": 97,
+      "url": "https://github.com/bayramog/ludo/issues/97"
+    },
+    "CORE-mesen": {
+      "number": 98,
+      "url": "https://github.com/bayramog/ludo/issues/98"
+    },
+    "CORE-mesen-s": {
+      "number": 99,
+      "url": "https://github.com/bayramog/ludo/issues/99"
+    },
+    "CORE-mgba": {
+      "number": 100,
+      "url": "https://github.com/bayramog/ludo/issues/100"
+    },
+    "CORE-mupen64plus_next": {
+      "number": 101,
+      "url": "https://github.com/bayramog/ludo/issues/101"
+    },
+    "CORE-nekop2": {
+      "number": 102,
+      "url": "https://github.com/bayramog/ludo/issues/102"
+    },
+    "CORE-neocd": {
+      "number": 103,
+      "url": "https://github.com/bayramog/ludo/issues/103"
+    },
+    "CORE-nestopia": {
+      "number": 104,
+      "url": "https://github.com/bayramog/ludo/issues/104"
+    },
+    "CORE-noods": {
+      "number": 105,
+      "url": "https://github.com/bayramog/ludo/issues/105"
+    },
+    "CORE-np2kai": {
+      "number": 106,
+      "url": "https://github.com/bayramog/ludo/issues/106"
+    },
+    "CORE-o2em": {
+      "number": 107,
+      "url": "https://github.com/bayramog/ludo/issues/107"
+    },
+    "CORE-opera": {
+      "number": 108,
+      "url": "https://github.com/bayramog/ludo/issues/108"
+    },
+    "CORE-parallel_n64": {
+      "number": 109,
+      "url": "https://github.com/bayramog/ludo/issues/109"
+    },
+    "CORE-pcsx2": {
+      "number": 110,
+      "url": "https://github.com/bayramog/ludo/issues/110"
+    },
+    "CORE-pcsx_rearmed": {
+      "number": 111,
+      "url": "https://github.com/bayramog/ludo/issues/111"
+    },
+    "CORE-pd777": {
+      "number": 112,
+      "url": "https://github.com/bayramog/ludo/issues/112"
+    },
+    "CORE-picodrive": {
+      "number": 113,
+      "url": "https://github.com/bayramog/ludo/issues/113"
+    },
+    "CORE-pokemini": {
+      "number": 114,
+      "url": "https://github.com/bayramog/ludo/issues/114"
+    },
+    "CORE-potator": {
+      "number": 115,
+      "url": "https://github.com/bayramog/ludo/issues/115"
+    },
+    "CORE-ppsspp": {
+      "number": 116,
+      "url": "https://github.com/bayramog/ludo/issues/116"
+    },
+    "CORE-prosystem": {
+      "number": 117,
+      "url": "https://github.com/bayramog/ludo/issues/117"
+    },
+    "CORE-puae": {
+      "number": 118,
+      "url": "https://github.com/bayramog/ludo/issues/118"
+    },
+    "CORE-px68k": {
+      "number": 119,
+      "url": "https://github.com/bayramog/ludo/issues/119"
+    },
+    "CORE-quasi88": {
+      "number": 120,
+      "url": "https://github.com/bayramog/ludo/issues/120"
+    },
+    "CORE-race": {
+      "number": 121,
+      "url": "https://github.com/bayramog/ludo/issues/121"
+    },
+    "CORE-same_cdi": {
+      "number": 122,
+      "url": "https://github.com/bayramog/ludo/issues/122"
+    },
+    "CORE-sameboy": {
+      "number": 123,
+      "url": "https://github.com/bayramog/ludo/issues/123"
+    },
+    "CORE-sameduck": {
+      "number": 124,
+      "url": "https://github.com/bayramog/ludo/issues/124"
+    },
+    "CORE-snes9x": {
+      "number": 125,
+      "url": "https://github.com/bayramog/ludo/issues/125"
+    },
+    "CORE-snes9x2005": {
+      "number": 126,
+      "url": "https://github.com/bayramog/ludo/issues/126"
+    },
+    "CORE-stella": {
+      "number": 127,
+      "url": "https://github.com/bayramog/ludo/issues/127"
+    },
+    "CORE-stella2014": {
+      "number": 128,
+      "url": "https://github.com/bayramog/ludo/issues/128"
+    },
+    "CORE-supermodel": {
+      "number": 129,
+      "url": "https://github.com/bayramog/ludo/issues/129"
+    },
+    "CORE-swanstation": {
+      "number": 130,
+      "url": "https://github.com/bayramog/ludo/issues/130"
+    },
+    "CORE-tgbdual": {
+      "number": 131,
+      "url": "https://github.com/bayramog/ludo/issues/131"
+    },
+    "CORE-theodore": {
+      "number": 132,
+      "url": "https://github.com/bayramog/ludo/issues/132"
+    },
+    "CORE-uzem": {
+      "number": 133,
+      "url": "https://github.com/bayramog/ludo/issues/133"
+    },
+    "CORE-vecx": {
+      "number": 134,
+      "url": "https://github.com/bayramog/ludo/issues/134"
+    },
+    "CORE-vice_x128": {
+      "number": 135,
+      "url": "https://github.com/bayramog/ludo/issues/135"
+    },
+    "CORE-vice_x64": {
+      "number": 136,
+      "url": "https://github.com/bayramog/ludo/issues/136"
+    },
+    "CORE-vice_x64sc": {
+      "number": 137,
+      "url": "https://github.com/bayramog/ludo/issues/137"
+    },
+    "CORE-vice_xpet": {
+      "number": 138,
+      "url": "https://github.com/bayramog/ludo/issues/138"
+    },
+    "CORE-vice_xplus4": {
+      "number": 139,
+      "url": "https://github.com/bayramog/ludo/issues/139"
+    },
+    "CORE-vice_xvic": {
+      "number": 140,
+      "url": "https://github.com/bayramog/ludo/issues/140"
+    },
+    "CORE-virtualjaguar": {
+      "number": 141,
+      "url": "https://github.com/bayramog/ludo/issues/141"
+    },
+    "CORE-x1": {
+      "number": 142,
+      "url": "https://github.com/bayramog/ludo/issues/142"
+    },
+    "CORE-yabasanshiro": {
+      "number": 143,
+      "url": "https://github.com/bayramog/ludo/issues/143"
+    },
+    "CORE-ymir": {
+      "number": 144,
+      "url": "https://github.com/bayramog/ludo/issues/144"
+    },
+    "F3-02": {
+      "number": 145,
+      "url": "https://github.com/bayramog/ludo/issues/145"
+    },
+    "F3-03": {
+      "number": 146,
+      "url": "https://github.com/bayramog/ludo/issues/146"
+    },
+    "F4-04": {
+      "number": 147,
+      "url": "https://github.com/bayramog/ludo/issues/147"
+    },
+    "F5-01": {
+      "number": 148,
+      "url": "https://github.com/bayramog/ludo/issues/148"
+    },
+    "F5-02": {
+      "number": 149,
+      "url": "https://github.com/bayramog/ludo/issues/149"
+    },
+    "EMU-altirra": {
+      "number": 150,
+      "url": "https://github.com/bayramog/ludo/issues/150"
+    },
+    "EMU-amiberry": {
+      "number": 151,
+      "url": "https://github.com/bayramog/ludo/issues/151"
+    },
+    "EMU-amigaforever": {
+      "number": 152,
+      "url": "https://github.com/bayramog/ludo/issues/152"
+    },
+    "EMU-applewin": {
+      "number": 153,
+      "url": "https://github.com/bayramog/ludo/issues/153"
+    },
+    "EMU-arcadeduck": {
+      "number": 154,
+      "url": "https://github.com/bayramog/ludo/issues/154"
+    },
+    "EMU-ares": {
+      "number": 155,
+      "url": "https://github.com/bayramog/ludo/issues/155"
+    },
+    "EMU-azahar": {
+      "number": 156,
+      "url": "https://github.com/bayramog/ludo/issues/156"
+    },
+    "EMU-bigpemu": {
+      "number": 157,
+      "url": "https://github.com/bayramog/ludo/issues/157"
+    },
+    "EMU-bizhawk": {
+      "number": 158,
+      "url": "https://github.com/bayramog/ludo/issues/158"
+    },
+    "EMU-blastem": {
+      "number": 159,
+      "url": "https://github.com/bayramog/ludo/issues/159"
+    },
+    "EMU-capriceforever": {
+      "number": 160,
+      "url": "https://github.com/bayramog/ludo/issues/160"
+    },
+    "EMU-cemu": {
+      "number": 161,
+      "url": "https://github.com/bayramog/ludo/issues/161"
+    },
+    "EMU-chihiro": {
+      "number": 162,
+      "url": "https://github.com/bayramog/ludo/issues/162"
+    },
+    "EMU-chihiro-gun": {
+      "number": 163,
+      "url": "https://github.com/bayramog/ludo/issues/163"
+    },
+    "EMU-citra": {
+      "number": 164,
+      "url": "https://github.com/bayramog/ludo/issues/164"
+    },
+    "EMU-citron": {
+      "number": 165,
+      "url": "https://github.com/bayramog/ludo/issues/165"
+    },
+    "EMU-cxbx": {
+      "number": 166,
+      "url": "https://github.com/bayramog/ludo/issues/166"
+    },
+    "EMU-daphne": {
+      "number": 167,
+      "url": "https://github.com/bayramog/ludo/issues/167"
+    },
+    "EMU-demul": {
+      "number": 168,
+      "url": "https://github.com/bayramog/ludo/issues/168"
+    },
+    "EMU-desmume": {
+      "number": 169,
+      "url": "https://github.com/bayramog/ludo/issues/169"
+    },
+    "EMU-dolphin": {
+      "number": 170,
+      "url": "https://github.com/bayramog/ludo/issues/170"
+    },
+    "EMU-dolphin-triforce": {
+      "number": 171,
+      "url": "https://github.com/bayramog/ludo/issues/171"
+    },
+    "EMU-dosbox": {
+      "number": 172,
+      "url": "https://github.com/bayramog/ludo/issues/172"
+    },
+    "EMU-dosbox-pure": {
+      "number": 173,
+      "url": "https://github.com/bayramog/ludo/issues/173"
+    },
+    "EMU-dosbox-staging": {
+      "number": 174,
+      "url": "https://github.com/bayramog/ludo/issues/174"
+    },
+    "EMU-duckstation": {
+      "number": 175,
+      "url": "https://github.com/bayramog/ludo/issues/175"
+    },
+    "EMU-eden": {
+      "number": 176,
+      "url": "https://github.com/bayramog/ludo/issues/176"
+    },
+    "EMU-eka2l1": {
+      "number": 177,
+      "url": "https://github.com/bayramog/ludo/issues/177"
+    },
+    "EMU-exodos": {
+      "number": 178,
+      "url": "https://github.com/bayramog/ludo/issues/178"
+    },
+    "EMU-fbneo": {
+      "number": 179,
+      "url": "https://github.com/bayramog/ludo/issues/179"
+    },
+    "EMU-flycast": {
+      "number": 180,
+      "url": "https://github.com/bayramog/ludo/issues/180"
+    },
+    "EMU-gopher64": {
+      "number": 181,
+      "url": "https://github.com/bayramog/ludo/issues/181"
+    },
+    "EMU-groovymame": {
+      "number": 182,
+      "url": "https://github.com/bayramog/ludo/issues/182"
+    },
+    "EMU-gsplus": {
+      "number": 183,
+      "url": "https://github.com/bayramog/ludo/issues/183"
+    },
+    "EMU-hatari": {
+      "number": 184,
+      "url": "https://github.com/bayramog/ludo/issues/184"
+    },
+    "EMU-hbmame": {
+      "number": 185,
+      "url": "https://github.com/bayramog/ludo/issues/185"
+    },
+    "EMU-hypseus": {
+      "number": 186,
+      "url": "https://github.com/bayramog/ludo/issues/186"
+    },
+    "EMU-jgenesis": {
+      "number": 187,
+      "url": "https://github.com/bayramog/ludo/issues/187"
+    },
+    "EMU-jynx": {
+      "number": 188,
+      "url": "https://github.com/bayramog/ludo/issues/188"
+    },
+    "EMU-jzintv": {
+      "number": 189,
+      "url": "https://github.com/bayramog/ludo/issues/189"
+    },
+    "EMU-kega-fusion": {
+      "number": 190,
+      "url": "https://github.com/bayramog/ludo/issues/190"
+    },
+    "EMU-kronos": {
+      "number": 191,
+      "url": "https://github.com/bayramog/ludo/issues/191"
+    },
+    "EMU-linuxloader": {
+      "number": 192,
+      "url": "https://github.com/bayramog/ludo/issues/192"
+    },
+    "EMU-m2emulator": {
+      "number": 193,
+      "url": "https://github.com/bayramog/ludo/issues/193"
+    },
+    "EMU-magicengine": {
+      "number": 194,
+      "url": "https://github.com/bayramog/ludo/issues/194"
+    },
+    "EMU-mame64": {
+      "number": 195,
+      "url": "https://github.com/bayramog/ludo/issues/195"
+    },
+    "EMU-mandarine": {
+      "number": 196,
+      "url": "https://github.com/bayramog/ludo/issues/196"
+    },
+    "EMU-mednafen": {
+      "number": 197,
+      "url": "https://github.com/bayramog/ludo/issues/197"
+    },
+    "EMU-melonds": {
+      "number": 198,
+      "url": "https://github.com/bayramog/ludo/issues/198"
+    },
+    "EMU-mesen": {
+      "number": 199,
+      "url": "https://github.com/bayramog/ludo/issues/199"
+    },
+    "EMU-mgba": {
+      "number": 200,
+      "url": "https://github.com/bayramog/ludo/issues/200"
+    },
+    "EMU-mupen64": {
+      "number": 201,
+      "url": "https://github.com/bayramog/ludo/issues/201"
+    },
+    "EMU-nosgba": {
+      "number": 202,
+      "url": "https://github.com/bayramog/ludo/issues/202"
+    },
+    "EMU-openmsx": {
+      "number": 203,
+      "url": "https://github.com/bayramog/ludo/issues/203"
+    },
+    "EMU-oricutron": {
+      "number": 204,
+      "url": "https://github.com/bayramog/ludo/issues/204"
+    },
+    "EMU-pcsx2": {
+      "number": 205,
+      "url": "https://github.com/bayramog/ludo/issues/205"
+    },
+    "EMU-pcsx2x6": {
+      "number": 206,
+      "url": "https://github.com/bayramog/ludo/issues/206"
+    },
+    "EMU-phoenix": {
+      "number": 207,
+      "url": "https://github.com/bayramog/ludo/issues/207"
+    },
+    "EMU-play": {
+      "number": 208,
+      "url": "https://github.com/bayramog/ludo/issues/208"
+    },
+    "EMU-ppsspp": {
+      "number": 209,
+      "url": "https://github.com/bayramog/ludo/issues/209"
+    },
+    "EMU-project64": {
+      "number": 210,
+      "url": "https://github.com/bayramog/ludo/issues/210"
+    },
+    "EMU-psxmame": {
+      "number": 211,
+      "url": "https://github.com/bayramog/ludo/issues/211"
+    },
+    "EMU-raine": {
+      "number": 212,
+      "url": "https://github.com/bayramog/ludo/issues/212"
+    },
+    "EMU-redream": {
+      "number": 213,
+      "url": "https://github.com/bayramog/ludo/issues/213"
+    },
+    "EMU-rpcs3": {
+      "number": 214,
+      "url": "https://github.com/bayramog/ludo/issues/214"
+    },
+    "EMU-ryujinx": {
+      "number": 215,
+      "url": "https://github.com/bayramog/ludo/issues/215"
+    },
+    "EMU-shadps4": {
+      "number": 216,
+      "url": "https://github.com/bayramog/ludo/issues/216"
+    },
+    "EMU-simcoupe": {
+      "number": 217,
+      "url": "https://github.com/bayramog/ludo/issues/217"
+    },
+    "EMU-simple64": {
+      "number": 218,
+      "url": "https://github.com/bayramog/ludo/issues/218"
+    },
+    "EMU-singe2": {
+      "number": 219,
+      "url": "https://github.com/bayramog/ludo/issues/219"
+    },
+    "EMU-snes9x": {
+      "number": 220,
+      "url": "https://github.com/bayramog/ludo/issues/220"
+    },
+    "EMU-ssf": {
+      "number": 221,
+      "url": "https://github.com/bayramog/ludo/issues/221"
+    },
+    "EMU-stella": {
+      "number": 222,
+      "url": "https://github.com/bayramog/ludo/issues/222"
+    },
+    "EMU-sudachi": {
+      "number": 223,
+      "url": "https://github.com/bayramog/ludo/issues/223"
+    },
+    "EMU-supermodel": {
+      "number": 224,
+      "url": "https://github.com/bayramog/ludo/issues/224"
+    },
+    "EMU-teknoparrot": {
+      "number": 225,
+      "url": "https://github.com/bayramog/ludo/issues/225"
+    },
+    "EMU-tsugaru": {
+      "number": 226,
+      "url": "https://github.com/bayramog/ludo/issues/226"
+    },
+    "EMU-vita3k": {
+      "number": 227,
+      "url": "https://github.com/bayramog/ludo/issues/227"
+    },
+    "EMU-winuae": {
+      "number": 228,
+      "url": "https://github.com/bayramog/ludo/issues/228"
+    },
+    "EMU-xemu": {
+      "number": 229,
+      "url": "https://github.com/bayramog/ludo/issues/229"
+    },
+    "EMU-xemu-chihiro": {
+      "number": 230,
+      "url": "https://github.com/bayramog/ludo/issues/230"
+    },
+    "EMU-xenia": {
+      "number": 231,
+      "url": "https://github.com/bayramog/ludo/issues/231"
+    },
+    "EMU-xenia-canary": {
+      "number": 232,
+      "url": "https://github.com/bayramog/ludo/issues/232"
+    },
+    "EMU-xenia-edge": {
+      "number": 233,
+      "url": "https://github.com/bayramog/ludo/issues/233"
+    },
+    "EMU-xenia-manager": {
+      "number": 234,
+      "url": "https://github.com/bayramog/ludo/issues/234"
+    },
+    "EMU-xm6pro": {
+      "number": 235,
+      "url": "https://github.com/bayramog/ludo/issues/235"
+    },
+    "EMU-xroar": {
+      "number": 236,
+      "url": "https://github.com/bayramog/ludo/issues/236"
+    },
+    "EMU-yabasanshiro": {
+      "number": 237,
+      "url": "https://github.com/bayramog/ludo/issues/237"
+    },
+    "EMU-ymir": {
+      "number": 238,
+      "url": "https://github.com/bayramog/ludo/issues/238"
+    },
+    "EMU-yuzu": {
+      "number": 239,
+      "url": "https://github.com/bayramog/ludo/issues/239"
+    },
+    "EMU-zesarux": {
+      "number": 240,
+      "url": "https://github.com/bayramog/ludo/issues/240"
+    },
+    "EMU-zinc": {
+      "number": 241,
+      "url": "https://github.com/bayramog/ludo/issues/241"
+    },
+    "F5-03": {
+      "number": 242,
+      "url": "https://github.com/bayramog/ludo/issues/242"
+    },
+    "F5-04": {
+      "number": 243,
+      "url": "https://github.com/bayramog/ludo/issues/243"
+    },
+    "EPIC": {
+      "number": 244,
+      "url": "https://github.com/bayramog/ludo/issues/244"
+    }
+  }
+}
