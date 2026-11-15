@@ -1,0 +1,35 @@
+name: Windows foundations
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paths-settings:
+    name: Paths and settings (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the shared engine
+        run: python -m pip install -e engine
+      # These scripts isolate HOME, USERPROFILE and both app-data roots before
+      # importing the engine. This is native Windows CI, not a claim that the
+      # complete app has passed Windows 11 desktop acceptance (F0-02/F5-04).
+      - name: Paths, credentials and failed-write recovery
+        run: python engine/tests/test_windows_paths.py
+      - name: Existing credential key compatibility
+        run: python engine/tests/test_settings_key.py
