@@ -36,6 +36,13 @@ Stopping the request loop/watcher is not proof the download worker has stopped.
 Frontend-initiated downloads, collection sync, play tracking and BIOS workers
 retain their existing behavior; these two locks do not serialize those workers.
 
+The backend also imports Switch mod helpers. Their separate, blocking POSIX
+transaction lock imports `fcntl` only when a transaction starts, so it does not
+prevent the backend from loading on Windows. That lock's behavior is unchanged:
+mod install/remove/recovery still requires POSIX `flock`, and fails before
+touching transaction state if it is unavailable. This is not a Windows mod
+package port.
+
 ## Upgrade and rollback
 
 Stop **all** old desktop/Decky/GTK instances sharing the relevant config root
@@ -62,6 +69,9 @@ applications and Windows desktop acceptance require separate verification.
   and existing install-request behavior.
 - `engine/tests/run.sh` is the standalone engine runner; engine scripts are not
   pytest tests. Some existing scripts depend on Linux-specific facilities.
+- `python engine/tests/test_switch_mods_import.py` makes `fcntl` unavailable in
+  a fresh interpreter and verifies import succeeds but transactions refuse to
+  run or create state. It supplies no replacement lock implementation.
 - `.github/workflows/process-locks.yml` runs only these lock/ownership checks on
   native Windows/Linux and Python 3.11/3.13. The test entry points isolate HOME,
   USERPROFILE, APPDATA and LOCALAPPDATA before imports.
