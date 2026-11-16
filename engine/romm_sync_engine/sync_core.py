@@ -13296,7 +13296,7 @@ class AutoSyncManager:
                             # Clear per-file debounce; the session boundary (close)
                             # is where we push this play session's saves as a batch.
                             self.upload_debounce.clear()
-                            self.restore_overlaid_settings()
+                            self.retroarch.restore_overlaid_settings()
                             # RomM session-based sync: reconcile all saves now that
                             # RetroArch has flushed them on exit.
                             self.trigger_session_save_sync("RetroArch closed")
