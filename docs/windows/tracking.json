@@ -1010,6 +1010,10 @@
     "paths": {
       "number": 246,
       "url": "https://github.com/bayramog/ludo/pull/246"
+    },
+    "foundation_ci": {
+      "number": 247,
+      "url": "https://github.com/bayramog/ludo/pull/247"
     }
   }
 }

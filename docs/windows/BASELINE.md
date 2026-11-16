@@ -57,14 +57,27 @@ The initial path/settings change passed all 173 backend tests again in
 130.46 s. Fifteen new path/settings contracts and the existing five credential
 key checks passed locally. A regression test first reproduced failure for a
 `ROM arşivi %50` directory, then passed after disabling unintended INI template
-interpolation. The final commit's Linux CI result must be checked separately;
-the earlier full-backend result predates that last small correction.
+interpolation. The final commit's Linux CI evidence below covers that last
+correction as well as the earlier filesystem/settings changes.
 
-A native Windows/Linux workflow for Python 3.11 and 3.13 is prepared in
-`feat/windows-foundation-ci`. GitHub rejected publishing the workflow because
-the current OAuth credential lacks the `workflow` scope. The source changes
-were published separately using existing permission. Authorization to extend
-the scope is pending; no Windows CI pass is claimed.
+A native Windows/Linux workflow for Python 3.11 and 3.13 is published in
+[draft PR #247](https://github.com/bayramog/ludo/pull/247), on
+`feat/windows-foundation-ci`. Publication was initially blocked by the OAuth
+credential's missing `workflow` scope. The user authorized extending that scope
+on 2026-11-16; the scope was verified and the branch pushed successfully.
+
+On commit `43870127e7f8b264308eb3d7baeb05eafa80f845`, the
+[native portability run](https://github.com/bayramog/ludo/actions/runs/43820492115)
+passed all four combinations of Windows/Linux and Python 3.11/3.13. This is
+native runner evidence for the path/settings and credential-key contracts,
+not full Windows backend/UI coverage or Windows 11 device acceptance. The
+remaining portable runner/full CI scope stays open in F1-06 / #11.
+
+Each job ran all 15 path/settings tests and the five credential compatibility
+checks. Logs identify the Windows runners as Windows Server 2025 Datacenter
+(10.0.26100), and Linux as Ubuntu 26.04.1 LTS. Both Python versions passed on
+each OS. In particular, this Windows runner result does not substitute for
+the planned Windows 11 desktop/handheld acceptance.
 
 Existing Linux/Decky CI was explicitly dispatched on the paths branch. On the
 final code commit `7a044ccb45a6fdb85d92251fef5134cf6d22049f`, the
