@@ -32,5 +32,7 @@ jobs:
       # This matrix covers locks and worker ownership, not desktop acceptance.
       - name: Native process locks and autosync ownership
         run: python engine/tests/test_process_lock.py
+      - name: Mod helper import and unavailable POSIX lock
+        run: python engine/tests/test_switch_mods_import.py
       - name: Backend install ownership and actual download shutdown
         run: python -m pytest -q app/tests/test_device_installs.py
