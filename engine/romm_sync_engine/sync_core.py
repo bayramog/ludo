@@ -15444,7 +15444,7 @@ class AutoSyncManager:
             if title_id in awaiting and self._eden_restore_still_owed(
                     title_id, awaiting[title_id]):
                 continue
-            rom_id = self._rom_id_for_title_id(title_id)
+            rom_id = self._save_rom_id(self._rom_id_for_title_id(title_id))
             if not rom_id:
                 # No local ROM carries this title ID. Without Sigil the ID is
                 # only legible in a ROM's filename, so an unmatched save is the
@@ -15531,7 +15531,7 @@ class AutoSyncManager:
         inst, pid = target
         pack_dir = cache_dir() / 'packed_saves' / 'cemu'
         for title_id, unit in cemu_saves.units(inst.mlc, pid).items():
-            rom_id = self._rom_id_for_title_id(title_id)
+            rom_id = self._save_rom_id(self._rom_id_for_title_id(title_id))
             if not rom_id:
                 logging.debug(f"Cemu save {title_id} matches no known ROM; skipping")
                 continue
@@ -16597,14 +16597,15 @@ class AutoSyncManager:
             return summary
 
         inventory = self.build_sync_inventory()
-        if only_rom_id is not None:
-            inventory = [e for e in inventory if e['rom_id'] == only_rom_id]
+        scope = self._tile_scope(only_rom_id) if only_rom_id is not None else None
+        if scope is not None:
+            inventory = [e for e in inventory if e['rom_id'] in scope]
         # Parked conflicts are re-found every cycle; one that settled itself
         # meanwhile (the other side caught up) drops.
         state = self._conflicts()
         with state['lock']:
             dropped = [c for c, v in state['pending'].items()
-                       if only_rom_id is None or v['rom_id'] == only_rom_id]
+                       if scope is None or v['rom_id'] in scope]
             for cid in dropped:
                 del state['pending'][cid]
         if dropped:
@@ -16627,6 +16628,7 @@ class AutoSyncManager:
             self.log("⚠️ Save-sync: negotiate failed")
             return summary
 
+        operations = self._pick_tile_saves(operations or [], inventory)
         # Lookup local inventory entry by (rom_id, slot) for upload operations.
         inv_by_key = {(e['rom_id'], e['slot']): e for e in inventory}
         saves_dir = self.retroarch.save_dirs.get('saves')
@@ -16650,6 +16652,11 @@ class AutoSyncManager:
             if _games:
                 installed_roms = {g.get('rom_id') for g in _games
                                   if g.get('is_downloaded')}
+                # A grouped Wii U / Switch tile's save can be filed under any
+                # of its ROMs (_pick_tile_saves keeps one).
+                for g in _games:
+                    if g.get('is_downloaded') and _platform_of(g) in self.TILE_SAVE_PLATFORMS:
+                        installed_roms.update(self._tile_rom_ids(g))
         except Exception as e:
             logging.debug(f"could not resolve installed roms: {e}")
         # Track whether we updated any synced fingerprints so we persist once.
@@ -16664,7 +16671,7 @@ class AutoSyncManager:
             slot = op.get('slot')
             if (rom_id, slot) in channel_keys:
                 continue
-            if only_rom_id is not None and rom_id != only_rom_id:
+            if scope is not None and rom_id not in scope:
                 continue
             # Full op payload for non-trivial actions: shows the server's view
             # (its hash/updated_at) so a repeated upload/conflict can be
@@ -17673,11 +17680,150 @@ class AutoSyncManager:
         return f"{AUTOSAVE_UPLOAD_STEM}{Path(path).suffix.lower()}"
 
     def _game_for_rom(self, rom_id):
+        """The library entry for ``rom_id``: its own tile, else the tile it is
+        grouped into (a sibling or variant id has no entry of its own)."""
         try:
-            return next((g for g in (self.get_games() or [])
-                         if g.get('rom_id') == rom_id), None)
+            games = self.get_games() or []
+            found = next((g for g in games if g.get('rom_id') == rom_id), None)
+            if found is None and rom_id:
+                key = (id(games), len(games))
+                cached = getattr(self, '_tile_index', None)
+                if not cached or cached[0] != key:
+                    index = {}
+                    for g in games:
+                        for i in self._tile_rom_ids(g)[1:]:
+                            index.setdefault(i, g)
+                    cached = self._tile_index = (key, index)
+                found = cached[1].get(rom_id)
+            return found
         except Exception:
             return None
+
+    # Grouped tiles (an unpacked folder and a .wua of the same game, or two
+    # dumps of one Switch title) are one game with one save, and the save
+    # folder is the title's either way. Argosy files a save under the ROM it
+    # played and only reads saves on that ROM, so Ludo does the same when
+    # writing and, when reading, takes the newest save on any ROM of the tile.
+    TILE_SAVE_PLATFORMS = ('wiiu', 'switch')
+
+    @staticmethod
+    def _tile_rom_ids(game):
+        """Every ROM id grouped into ``game``'s tile, its own first."""
+        ids = [game.get('rom_id')]
+        for key in ('_sibling_files', '_region_save_siblings', 'sibling_roms'):
+            ids += [s.get('id') for s in (game.get(key) or []) if isinstance(s, dict)]
+        for key in (game.get('_variant_downloads') or {}):
+            try:
+                ids.append(int(key))
+            except (TypeError, ValueError):
+                pass
+        out = []
+        for i in ids:
+            if i and i not in out:
+                out.append(i)
+        return out
+
+    def _played_rom_id(self, game):
+        """The ROM of ``game``'s tile whose file this device plays: the version
+        last launched while it is still on disk, else the one at local_path."""
+        main = game.get('rom_id')
+        on_disk = {}
+        for key, v in (game.get('_variant_downloads') or {}).items():
+            path = (v or {}).get('local_path') if isinstance(v, dict) else None
+            try:
+                if path and Path(path).exists():
+                    on_disk[int(key)] = path
+            except (TypeError, ValueError, OSError):
+                continue
+        local = game.get('local_path')
+        main_on_disk = bool(local) and local not in on_disk.values()
+        try:
+            last = int(self.settings.get('LastVersion', str(main), '') or 0)
+        except Exception:
+            last = 0
+        if last and (last in on_disk or (last == main and main_on_disk)):
+            return last
+        if main_on_disk or not on_disk:
+            return main
+        return next((vid for vid, path in on_disk.items() if path == local),
+                    next(iter(on_disk)))
+
+    def _save_rom_id(self, rom_id):
+        """The ROM id a Wii U or Switch save from this device is filed under:
+        the version played here (see TILE_SAVE_PLATFORMS). Others unchanged."""
+        game = self._game_for_rom(rom_id)
+        if not game or _platform_of(game) not in self.TILE_SAVE_PLATFORMS:
+            return rom_id
+        return self._played_rom_id(game) or rom_id
+
+    def _tile_scope(self, rom_id):
+        """ROM ids a one-game sync covers: the whole tile for Wii U and Switch."""
+        game = self._game_for_rom(rom_id)
+        if game and _platform_of(game) in self.TILE_SAVE_PLATFORMS:
+            return set(self._tile_rom_ids(game)) | {rom_id}
+        return {rom_id}
+
+    @staticmethod
+    def _stamp(value):
+        try:
+            t = datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=datetime.timezone.utc)
+            return t.timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    def _pick_tile_saves(self, operations, inventory):
+        """One save per grouped Wii U / Switch game.
+
+        A tile's autosave can sit on several of its ROMs (another device
+        played the other version), and every one of them unpacks into the
+        same title folder, so applying them all would let an older one land
+        last. Of the server's saves on the tile's ROMs and this device's own,
+        the newest wins: a server save on another ROM of the tile replaces
+        what the device has only when it is newer and different, and the
+        others are left on the server untouched.
+        """
+        groups = {}
+        for op in operations:
+            if op.get('slot') != 'autosave':
+                continue
+            game = self._game_for_rom(op.get('rom_id'))
+            if not game or _platform_of(game) not in self.TILE_SAVE_PLATFORMS:
+                continue
+            groups.setdefault(game.get('rom_id'), (game, []))[1].append(op)
+        drop = set()
+        for main, (game, ops) in groups.items():
+            ids = set(self._tile_rom_ids(game))
+            local = next((e for e in inventory
+                          if e.get('slot') == 'autosave' and e.get('rom_id') in ids), None)
+            local_id = local.get('rom_id') if local else None
+            others = [op for op in ops if op.get('rom_id') != local_id
+                      and op.get('action') in ('download', 'conflict')]
+            if not others:
+                continue
+            best = max(others, key=lambda op: self._stamp(op.get('server_updated_at')) or 0)
+            best_t = self._stamp(best.get('server_updated_at')) or 0
+            own = [op for op in ops if op.get('rom_id') == local_id]
+            own_t = max([self._stamp(op.get('server_updated_at')) or 0 for op in own] + [0])
+            local_t = self._stamp(local.get('updated_at')) if local else None
+            wins = (best_t > own_t
+                    and (local is None
+                         or (best.get('server_content_hash') != local.get('content_hash')
+                             and best_t > (local_t or 0))))
+            for op in others:
+                if not (wins and op is best):
+                    drop.add(id(op))
+            if wins:
+                # The newer save is restored instead; the next sync files the
+                # result under this device's own ROM.
+                drop.update(id(op) for op in own if op.get('action') != 'no_op')
+                if best.get('action') == 'conflict':
+                    best['action'] = 'download'
+            logging.info(f"[SYNC-OP] tile {main}: "
+                         + (f"newest save is on ROM {best.get('rom_id')}" if wins
+                            else f"keeping this device's save on ROM {local_id}"))
+        return [op for op in operations if id(op) not in drop]
 
     def _dreamcast_card_name(self, rom_id, game, port):
         """The file flycast reads this game's VMU in ``port`` from.

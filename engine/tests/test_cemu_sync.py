@@ -147,6 +147,75 @@ class CemuSyncTest(unittest.TestCase):
         self.use(mia)
         self.assertEqual(RetroArchInterface._cemu_account_args(EXE), ['-a', '80000003'])
 
+    def tile_manager(self, last=''):
+        wua = self.home / 'roms/wiiu/Terraria.wua'
+        wua.parent.mkdir(parents=True, exist_ok=True)
+        wua.write_bytes(b'x')
+        m = self.manager()
+        tile = {'rom_id': 7, 'platform_slug': 'wiiu', 'is_downloaded': True,
+                'local_path': str(wua), 'romm_data': {'save_target': '00050000/10198f00'},
+                '_sibling_files': [{'id': 8, 'fs_name': 'Terraria.wua'}],
+                '_variant_downloads': {'8': {'local_path': str(wua)}}}
+        other = {'rom_id': 9, 'platform_slug': 'snes', 'is_downloaded': True,
+                 '_sibling_files': [{'id': 10}]}
+        m.get_games = lambda: [tile, other]
+        m.settings = type('S', (), {'get': lambda self, sec, key, d='': (
+            last if (sec, key) == ('LastVersion', '7') else d)})()
+        return m
+
+    def test_a_grouped_game_saves_under_the_version_played(self):
+        C.ensure_default_account(self.inst.mlc)
+        self.write('user/80000001/save.dat', b'progress')
+        m = self.tile_manager()
+        # Only the .wua (ROM 8) is on disk: that is what Cemu plays, and what
+        # Argosy would file the save under.
+        [row] = m._cemu_inventory_entries()
+        self.assertEqual(row['rom_id'], 8)
+        self.assertIs(m._game_for_rom(8)['rom_id'], 7)
+        self.assertEqual(m._tile_scope(8), {7, 8})
+        self.assertEqual(m._tile_scope(10), {10})          # not Wii U / Switch
+        self.assertEqual(m._save_rom_id(9), 9)
+        m.get_games()[0]['platform_slug'] = 'switch'       # Eden saves alike
+        self.assertEqual(m._save_rom_id(7), 8)
+
+    def test_the_newest_save_on_any_rom_of_the_tile_wins(self):
+        m = self.tile_manager()
+        local = {'rom_id': 8, 'slot': 'autosave', 'content_hash': 'L',
+                 'updated_at': '2026-11-16T12:00:00+00:00'}
+
+        def op(rom, action, when=None, h=None):
+            o = {'rom_id': rom, 'slot': 'autosave', 'action': action}
+            if when:
+                o.update(server_updated_at=when, server_content_hash=h)
+            return o
+        snes = op(10, 'download', '2026-11-16T13:00:00+00:00', 'S')
+        # An older save on the other ROM (Ludo's own from before) stays put;
+        # this device's newer one goes up under the version it plays.
+        up, old = op(8, 'upload'), op(7, 'download', '2026-11-15T10:00:00+00:00', 'O')
+        self.assertEqual(m._pick_tile_saves([up, old, snes], [local]), [up, snes])
+        same = op(7, 'download', '2026-11-17T10:00:00+00:00', 'L')
+        self.assertEqual(m._pick_tile_saves([up, same], [local]), [up])
+        # A newer, different save there (another device) is restored instead.
+        new = op(7, 'conflict', '2026-11-17T10:00:00+00:00', 'N')
+        self.assertEqual(m._pick_tile_saves([up, new], [local]), [new])
+        self.assertEqual(new['action'], 'download')
+        # Nothing local: only the newest of the tile's server saves.
+        a = op(7, 'download', '2026-11-10T10:00:00+00:00', 'A')
+        b = op(8, 'download', '2026-11-12T10:00:00+00:00', 'B')
+        self.assertEqual(m._pick_tile_saves([a, b], []), [b])
+
+    def test_the_version_last_launched_wins_when_both_are_on_disk(self):
+        folder = self.home / 'roms/wiiu/Terraria'
+        folder.mkdir(parents=True)
+        m = self.tile_manager(last='7')
+        tile = m.get_games()[0]
+        tile['local_path'] = str(folder)
+        self.assertEqual(m._played_rom_id(tile), 7)
+        m = self.tile_manager(last='8')
+        tile = m.get_games()[0]
+        tile['local_path'] = str(folder)
+        self.assertEqual(m._played_rom_id(tile), 8)
+
 
 def main():
     result = unittest.TextTestRunner(verbosity=1).run(
