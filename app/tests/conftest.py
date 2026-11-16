@@ -7,4 +7,7 @@ module imports it. Tests that need their own HOME still set one per test.
 import os
 import tempfile
 
-os.environ["HOME"] = tempfile.mkdtemp(prefix="ludo-tests-home-")
+_home = tempfile.mkdtemp(prefix="ludo-tests-home-")
+os.environ.update(HOME=_home, USERPROFILE=_home,
+                  LOCALAPPDATA=os.path.join(_home, 'AppData', 'Local'),
+                  APPDATA=os.path.join(_home, 'AppData', 'Roaming'))

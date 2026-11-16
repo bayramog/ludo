@@ -8,6 +8,8 @@ Frontends call :func:`set_app_id` once, before touching anything else in the
 engine. The default keeps the GTK app working without any changes on its side.
 """
 
+import os
+import sys
 from pathlib import Path
 
 DEFAULT_APP_ID = "romm-retroarch-sync"
@@ -22,8 +24,20 @@ _library_dir_name = DEFAULT_LIBRARY_DIR_NAME
 _locked = False
 
 
+def _validate_directory_name(name: str) -> None:
+    """Names are one directory component on every supported platform."""
+    if (not name or name in ('.', '..') or name.endswith((' ', '.'))
+            or any(c in '<>:"/\\|?*' or ord(c) < 32 for c in name)
+            or name.split('.')[0].upper() in {
+                'CON', 'PRN', 'AUX', 'NUL',
+                *(f'COM{i}' for i in range(1, 10)),
+                *(f'LPT{i}' for i in range(1, 10)),
+            }):
+        raise ValueError(f"invalid directory name: {name!r}")
+
+
 def set_app_id(app_id: str) -> None:
-    """Point the engine at ``~/.config/<app_id>``.
+    """Select the application's per-user state directory.
 
     Must be called before the first :func:`config_dir` call. Calling it after
     the fact means some state has already been read from or written to the
@@ -31,8 +45,7 @@ def set_app_id(app_id: str) -> None:
     files across two locations.
     """
     global _app_id
-    if not app_id or "/" in app_id:
-        raise ValueError(f"invalid app id: {app_id!r}")
+    _validate_directory_name(app_id)
     if _locked and app_id != _app_id:
         raise RuntimeError(
             f"set_app_id({app_id!r}) called after paths were already resolved "
@@ -66,8 +79,7 @@ def set_library_dir_name(name: str) -> None:
     ``~/RomMSync``.
     """
     global _library_dir_name
-    if not name or "/" in name:
-        raise ValueError(f"invalid library dir name: {name!r}")
+    _validate_directory_name(name)
     _library_dir_name = name
 
 
@@ -89,10 +101,23 @@ def library_dir() -> Path:
 
 
 def config_dir() -> Path:
-    """The app's state directory. Created on first use."""
+    """The app's state directory. Created on first use.
+
+    Linux/Decky keep their established ~/.config layout. New Windows profiles
+    use non-roaming LOCALAPPDATA, independent of where the executable lives.
+    An existing legacy Windows directory stays authoritative: do not silently
+    split credentials and sync state during an upgrade. Moving it is a future
+    explicit migration, not a side effect of resolving a path.
+    """
     global _locked
     _locked = True
     d = Path.home() / ".config" / _app_id
+    if sys.platform == 'win32' and not d.exists():
+        local = os.environ.get('LOCALAPPDATA')
+        root = Path(local) if local else Path.home() / 'AppData' / 'Local'
+        if not root.is_absolute():
+            raise ValueError('LOCALAPPDATA must be an absolute path')
+        d = root / _app_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
