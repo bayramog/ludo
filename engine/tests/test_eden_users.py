@@ -127,6 +127,38 @@ class EdenUsersTest(unittest.TestCase):
         self.assertIn('error', P.eden_user(create=True))
         self.assertIsNone(E.eden_restore_dir(TITLE))
 
+    def test_eden_never_started_gets_the_user_list_eden_would_make(self):
+        from romm_sync_engine.sync_core import RetroArchInterface
+        U.profiles_file(self.data).unlink()
+        mia = P.create('Mia')
+        flatpak = self.home / '.var/app/dev.eden_emu.eden/data/eden'
+        # No Eden installed: nothing is written.
+        with patch.object(E, 'eden_install_data_dir', return_value=None):
+            self.use(mia)
+            self.assertIn('error', P.eden_user(create=True))
+        self.assertFalse(U.profiles_file(flatpak).exists())
+        # Eden installed but closed and never run: Eden's own default user
+        # ("Eden", kept by the first profile), then Mia's.
+        self.assertEqual(RetroArchInterface._eden_user_args('flatpak:dev.eden_emu.eden'),
+                         ['-u', '1'])
+        self.assertEqual([u['name'] for u in U.users(flatpak)], ['Eden', 'Mia'])
+        self.use(P.DEFAULT)
+        self.assertEqual(RetroArchInterface._eden_user_args('flatpak:dev.eden_emu.eden'),
+                         ['-u', '0'])
+        # A save restored for Mia before Eden's first start lands in her folder.
+        self.use(mia)
+        user = P.eden_user(create=True)
+        target = E.eden_restore_dir(TITLE)
+        self.assertEqual(target.parent.name, user['save_dir'])
+        # An existing list is never rewritten; a running Eden is never raced.
+        before = U.profiles_file(flatpak).read_bytes()
+        self.assertFalse(U.create_default(flatpak))
+        self.assertEqual(U.profiles_file(flatpak).read_bytes(), before)
+        other = self.home / 'other'
+        with patch.object(E, 'eden_is_running', return_value=True):
+            self.assertEqual(P._first_eden_user_list(other), [])
+        self.assertFalse(other.exists())
+
 
 def main():
     result = unittest.TextTestRunner(verbosity=1).run(

@@ -9315,10 +9315,7 @@ class RetroArchInterface:
         try:
             if not profiles.profiles_in_use():
                 return []
-            if executable.startswith('flatpak:'):
-                data_dir = Path.home() / '.var/app/dev.eden_emu.eden/data/eden'
-            else:
-                data_dir = Path(os.environ.get('EDEN_DATA_DIR') or Path.home() / '.local/share/eden')
+            data_dir = emulator_saves.eden_data_dir_for(executable)
             index = profiles.eden_launch_index(data_dir)
             return ['-u', str(index)] if index is not None else []
         except Exception as e:

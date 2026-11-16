@@ -56,6 +56,7 @@ keeps the user Eden already had selected; every other profile gets an Eden
 user of its own, added to Eden's user list (named after the profile) the first
 time it is needed, while Eden is closed. Ludo starts Eden with `-u` for that
 user and syncs only that user's save folder
-(`nand/user/save/0000000000000000/<user>/<title>`). Eden allows eight users;
-until a profile has one (Eden never started yet, or all eight taken), Ludo
-leaves Switch saves alone for it. Cemu saves are not synced by Ludo.
+(`nand/user/save/0000000000000000/<user>/<title>`). When Eden has never started, Ludo first
+writes the user list Eden would make itself (one user named "Eden", which
+stays the first profile's). Eden allows eight users; once they are all taken,
+Ludo leaves Switch saves alone for any new profile. Cemu saves are not synced by Ludo.

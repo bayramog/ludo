@@ -129,6 +129,23 @@ def eden_data_dirs(extra=None):
     return found
 
 
+def eden_data_dir_for(executable):
+    """The data directory the Eden at ``executable`` uses, existing or not."""
+    if str(executable or '').startswith('flatpak:'):
+        return Path(EDEN_DATA_DIRS[0]).expanduser()
+    return Path(os.environ.get('EDEN_DATA_DIR') or EDEN_DATA_DIRS[1]).expanduser()
+
+
+def eden_install_data_dir():
+    """Data directory of the Eden Ludo would launch, or None when no Eden is
+    installed. Unlike eden_data_dirs, it need not exist yet: Eden makes it on
+    its first start."""
+    from . import sync_core
+    exe = sync_core.find_standalone_executable(
+        'eden', sync_core.STANDALONE_EMULATORS['eden'])
+    return eden_data_dir_for(exe) if exe else None
+
+
 def find_prod_keys(extra_data_dir=None):
     """Path to Eden's prod.keys, or None.
 

@@ -68,6 +68,39 @@ def users(data_dir):
     return out
 
 
+def create_default(data_dir):
+    """Write the user list Eden makes on its first start, when there is none.
+
+    Eden creates one user named "Eden" with a random id the first time it
+    runs (profile_manager.cpp). Writing that same file ahead of it lets a
+    profile get its own user before Eden has ever been opened; Eden reads it
+    as if it had made it, and its default user stays the first profile's.
+    An existing file is never touched. Returns True when the file was written.
+    """
+    path = profiles_file(data_dir)
+    if path.exists():
+        return False
+    data = bytearray(_SIZE)
+    raw = secrets.token_bytes(16)
+    data[_HEADER:_HEADER + 16] = raw
+    data[_HEADER + 16:_HEADER + 32] = raw
+    data[_HEADER + _NAME_AT:_HEADER + _NAME_AT + _NAME_LEN] = _encode_name('Eden')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write(path, data)
+    return True
+
+
+def _write(path, data):
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.profiles-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(bytes(data))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def save_dir_name(uuid_hex):
     """The folder Eden keeps this user's saves in."""
     return bytes.fromhex(uuid_hex)[::-1].hex().upper()
@@ -119,13 +152,6 @@ def add(data_dir, name, uuid_hex=None):
         data[base + 16:base + 32] = raw
         struct.pack_into('<Q', data, base + 0x20, 0)
         data[base + _NAME_AT:base + _NAME_AT + _NAME_LEN] = _encode_name(name)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.profiles-')
-        try:
-            with os.fdopen(fd, 'wb') as f:
-                f.write(bytes(data))
-            os.replace(tmp, path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        _write(path, data)
         return raw.hex()
     raise EdenUsersError(f'Eden already has {MAX_USERS} users')

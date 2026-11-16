@@ -19,6 +19,7 @@ the last profile used and asks who is playing; the answer links the account.
 """
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -223,7 +224,25 @@ def _eden_dirs():
             if eden_users.users(d) is not None]
 
 
-def eden_user(create=False):
+def _first_eden_user_list(data_dir=None):
+    """Create Eden's user list where Eden has never run, as Eden itself
+    would on its first start (eden_users.create_default). [data dir] on
+    success, else []. Needs an installed, closed Eden."""
+    from . import eden_users, emulator_saves
+    if emulator_saves.eden_is_running():
+        return []
+    target = Path(data_dir) if data_dir else emulator_saves.eden_install_data_dir()
+    if target is None:
+        return []
+    try:
+        eden_users.create_default(target)
+    except OSError as e:
+        logging.warning(f"Could not create Eden's user list in {target}: {e}")
+        return []
+    return [target] if eden_users.users(target) is not None else []
+
+
+def eden_user(create=False, data_dir=None):
     """The Eden user the current profile plays as.
 
     None when profiles are not in use: callers behave exactly as before.
@@ -236,6 +255,8 @@ def eden_user(create=False):
         return None
     from . import eden_config, eden_users, emulator_saves
     dirs = _eden_dirs()
+    if not dirs and create:
+        dirs = _first_eden_user_list(data_dir)
     if not dirs:
         return {'error': 'Start Eden once so it creates its user list'}
     current = paths.profile_id()
@@ -278,7 +299,7 @@ def eden_user(create=False):
 def eden_launch_index(data_dir):
     """Eden's -u value for the current profile in the install at ``data_dir``,
     or None to launch as before."""
-    user = eden_user(create=True)
+    user = eden_user(create=True, data_dir=data_dir)
     if not user or 'uuid' not in user:
         return None
     from . import eden_users
