@@ -9902,10 +9902,104 @@ class RetroArchInterface:
                 lines += ['sort_savefiles_enable = "false"',
                           'sort_savefiles_by_content_enable = "true"']
             overlay.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            self._remember_overlaid_settings(cfg_dir, lines)
             return str(overlay)
         except Exception as e:
             print(f"⚠️  Could not write the launch config overlay: {e}")
             return ''
+
+    # Overlay keys that must not outlive the session. RetroArch saves its whole
+    # running config on exit (config_save_on_exit, on by default), appended
+    # values included, so without this a second profile's save folders became
+    # retroarch.cfg's — every profile's — and a sandbox's system folder stuck.
+    # Network commands and save sorting are left: Ludo wants those permanent.
+    OVERLAY_RESTORE_KEYS = ('system_directory', 'libretro_directory',
+                            'input_menu_toggle_gamepad_combo',
+                            'savefile_directory', 'savestate_directory')
+    OVERLAY_RESTORE_FILE = 'ludo-launch.restore.json'
+
+    @staticmethod
+    def _cfg_raw_lines(cfg, keys):
+        """{key: the line as written in cfg} for each key present."""
+        found = {}
+        if not cfg.exists():
+            return found
+        for line in cfg.read_text(encoding='utf-8', errors='replace').splitlines():
+            key = line.split('=', 1)[0].strip()
+            if key in keys and '=' in line and key not in found:
+                found[key] = line
+        return found
+
+    @staticmethod
+    def _cfg_line_value(line):
+        return line.split('=', 1)[1].strip().strip('"').strip() if line else None
+
+    def _remember_overlaid_settings(self, cfg_dir, lines):
+        """Note what retroarch.cfg held for each overlaid key, to put it back."""
+        try:
+            overlaid = {}
+            for line in lines:
+                key = line.split('=', 1)[0].strip()
+                if key in self.OVERLAY_RESTORE_KEYS:
+                    overlaid[key] = self._cfg_line_value(line)
+            record = Path(cfg_dir) / self.OVERLAY_RESTORE_FILE
+            # A record left by a session we never saw end still holds the true
+            # originals; the cfg may already carry that session's values.
+            if record.exists():
+                self.restore_overlaid_settings()
+            originals = self._cfg_raw_lines(Path(cfg_dir) / 'retroarch.cfg', overlaid)
+            entries = {k: {'overlay': v, 'original': originals.get(k)}
+                       for k, v in overlaid.items()
+                       if self._cfg_line_value(originals.get(k)) != v}
+            if entries:
+                record.write_text(json.dumps(entries), encoding='utf-8')
+            elif record.exists():
+                record.unlink()
+        except Exception as e:
+            print(f"⚠️  Could not note settings to restore after the session: {e}")
+
+    @staticmethod
+    def _same_path_value(written, overlay):
+        """Whether RetroArch's saved value is the overlay's, '~' abbreviation and all."""
+        if written == overlay:
+            return True
+        if written and overlay and written.startswith('~/'):
+            return overlay.endswith(written[1:])
+        return False
+
+    def restore_overlaid_settings(self):
+        """Undo what RetroArch saved from the last overlay into retroarch.cfg.
+
+        A key is only put back while it still holds the overlay's value: one
+        the user changed in RetroArch's menu during the session is theirs.
+        """
+        try:
+            cfg_dir = self.find_retroarch_config_dir() or self._install_tree()
+            if not cfg_dir:
+                return
+            record = Path(cfg_dir) / self.OVERLAY_RESTORE_FILE
+            if not record.exists():
+                return
+            entries = json.loads(record.read_text(encoding='utf-8'))
+            cfg = Path(cfg_dir) / 'retroarch.cfg'
+            if cfg.exists():
+                text = cfg.read_text(encoding='utf-8', errors='replace')
+                out, changed = [], False
+                for line in text.splitlines():
+                    key = line.split('=', 1)[0].strip()
+                    entry = entries.get(key) if '=' in line else None
+                    if entry and self._same_path_value(
+                            self._cfg_line_value(line), entry['overlay']):
+                        changed = True
+                        if entry['original'] is not None:
+                            out.append(entry['original'])
+                        continue
+                    out.append(line)
+                if changed:
+                    cfg.write_text('\n'.join(out) + '\n', encoding='utf-8')
+            record.unlink()
+        except Exception as e:
+            print(f"⚠️  Could not restore settings after the session: {e}")
 
     def _core_dir_override(self, core_path):
         """The core's folder when it is not RetroArch's libretro_directory, else ''."""
@@ -13216,6 +13310,7 @@ class AutoSyncManager:
                             # Clear per-file debounce; the session boundary (close)
                             # is where we push this play session's saves as a batch.
                             self.upload_debounce.clear()
+                            self.restore_overlaid_settings()
                             # RomM session-based sync: reconcile all saves now that
                             # RetroArch has flushed them on exit.
                             self.trigger_session_save_sync("RetroArch closed")

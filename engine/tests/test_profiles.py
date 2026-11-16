@@ -200,6 +200,35 @@ class ProfilesTest(unittest.TestCase):
         self.assertIn(f'savestate_directory = "{own["states"]}"', overlay)
         self.assertEqual((cfg_dir / 'retroarch.cfg').read_text(), before)
 
+    def test_retroarch_saving_the_overlay_on_exit_is_undone(self):
+        # RetroArch writes appended values into retroarch.cfg on exit; a second
+        # profile's folders must not become everyone's.
+        mia = P.create('Mia')
+        paths._locked, paths._profile_locked, paths._profile = False, False, P.DEFAULT
+        paths.set_profile(mia)
+        ra, cfg_dir = self.make_ra()
+        cfg = cfg_dir / 'retroarch.cfg'
+        before = cfg.read_text()
+        ra._launch_overlay_config(None)
+        own = P.save_dirs(mia)
+        # What RetroArch saves on exit: the overlay's paths, '~'-abbreviated,
+        # plus a menu change the user made during the session.
+        rel = str(own['states']).replace(str(self.home), '~')
+        lines = [l for l in before.splitlines()
+                 if not l.startswith(('savefile_directory', 'savestate_directory'))]
+        cfg.write_text('\n'.join(lines + [
+            f'savefile_directory = "{own["saves"]}"',
+            f'savestate_directory = "{rel}"',
+            'video_smooth = "true"']) + '\n')
+        ra.restore_overlaid_settings()
+        after = cfg.read_text()
+        self.assertNotIn('profiles', after)
+        self.assertIn('video_smooth = "true"', after)
+        for line in before.splitlines():
+            if line.startswith(('savefile_directory', 'savestate_directory')):
+                self.assertIn(line, after)
+        self.assertFalse((cfg_dir / ra.OVERLAY_RESTORE_FILE).exists())
+
     def test_default_profile_keeps_retroarchs_own_folders(self):
         ra, cfg_dir = self.make_ra()
         self.assertEqual(ra.expected_save_dir(), str(self.home / 'Ludo/saves'))
