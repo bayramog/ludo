@@ -9307,12 +9307,32 @@ class RetroArchInterface:
                         'platforms': list(spec['platforms'])})
         return out
 
+    @staticmethod
+    def _eden_user_args(executable):
+        """-u <n> so Eden plays as the current profile's own Switch user, whose
+        saves are the ones this profile syncs. Empty without profiles."""
+        from . import profiles
+        try:
+            if not profiles.profiles_in_use():
+                return []
+            if executable.startswith('flatpak:'):
+                data_dir = Path.home() / '.var/app/dev.eden_emu.eden/data/eden'
+            else:
+                data_dir = Path(os.environ.get('EDEN_DATA_DIR') or Path.home() / '.local/share/eden')
+            index = profiles.eden_launch_index(data_dir)
+            return ['-u', str(index)] if index is not None else []
+        except Exception as e:
+            logging.warning(f"Eden user for this profile unavailable: {e}")
+            return []
+
     def build_standalone_launch_command(self, rom_path, key, spec, executable):
         """argv for a standalone emulator, from its args template."""
         grant_root = Path(rom_path).parent
         if spec.get('resolve_rom') == 'wiiu':
             rom_path, grant_root = resolve_wiiu_rom(rom_path)
         args = [a.replace('{rom}', str(rom_path)) for a in spec['args']]
+        if key == 'eden':
+            args = self._eden_user_args(executable) + args
         if spec.get('prelaunch') == 'cemu_audio_repair':
             repair_cemu_audio_device(executable)
         if executable.startswith('flatpak:'):
@@ -15336,18 +15356,6 @@ class AutoSyncManager:
                 return RomMClient.compute_content_hash(packed) if packed else None
         return None
 
-    @staticmethod
-    def _eden_saves_are_ours():
-        """Whether this profile may sync Eden's saves.
-
-        Eden keeps one save tree per machine, not per profile. Syncing it from
-        a second profile would upload the first person's Switch saves to the
-        second person's RomM account, and restore theirs over the first
-        person's. Until Eden saves are kept per profile, only the first
-        profile (the one that existed before profiles) syncs them.
-        """
-        return profile_id() == 'default'
-
     def _eden_inventory_entries(self):
         """Inventory rows for Eden's Switch saves, packed one zip per game.
 
@@ -15372,8 +15380,6 @@ class AutoSyncManager:
         stays read-only — nothing in this method writes into Eden's tree.
         """
         entries = []
-        if not self._eden_saves_are_ours():
-            return entries
         # Eden flushes a Switch save when the game exits, not continuously, so
         # anything on disk mid-session is a partial picture of a save the
         # emulator still holds in memory. Packing it would upload a stale
@@ -16880,8 +16886,6 @@ class AutoSyncManager:
             return self._restore_gci_save(op, device_id, session_id)
         if self._is_folder_op(op):
             return self._restore_folder_save(op, device_id, session_id)
-        if not self._eden_saves_are_ours():
-            return False
         file_name = op.get('file_name') or ''
         # is_switch_title_id is the save-directory test specifically: Eden files
         # a save under the BASE title, never an update or DLC id.

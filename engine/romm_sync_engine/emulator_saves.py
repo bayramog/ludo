@@ -227,20 +227,39 @@ def _newest_mtime(directory):
     return newest
 
 
+def _profile_eden_user():
+    """The current profile's Eden user (see profiles.eden_user): None when
+    profiles are not in use, else {'save_dir'} or {'error'}."""
+    from . import profiles
+    return profiles.eden_user(create=True)
+
+
 def find_eden_saves(extra_data_dir=None):
     """Every Eden save on disk, as dicts of {title_id, path, modified}.
 
     Empty save directories are skipped — Eden creates one for a game the moment
     it boots, whether or not the game ever writes anything, and an empty save
     is not worth a sync round trip.
+
+    With profiles, only the current profile's Eden user is looked at: the
+    other users' saves belong to other people's RomM accounts.
     """
     best = {}
+    user = _profile_eden_user()
+    if user and 'error' in user:
+        log.info("Eden saves skipped for this profile: %s", user['error'])
+        return []
     for data_dir in eden_data_dirs(extra_data_dir):
         root = data_dir.joinpath(*_EDEN_SAVE_ROOT)
         if not root.is_dir():
             log.debug("no Eden save tree at %s (not booted a game yet)", root)
             continue
-        for title_id, directory in _walk_for_titles(root):
+        if user:
+            mine = root / ('0' * 16) / user['save_dir']
+            tree = [(t, d) for t, d in _walk_for_titles(mine)] if mine.is_dir() else []
+        else:
+            tree = _walk_for_titles(root)
+        for title_id, directory in tree:
             modified = _newest_mtime(directory)
             if modified is None:
                 # Empty. Eden creates a save directory when a game boots,
@@ -955,6 +974,15 @@ def eden_restore_dir(title_id, extra_data_dir=None):
     for save in find_eden_saves(extra_data_dir):
         if save['title_id'].lower() == title_id.lower():
             return save['path']
+    user = _profile_eden_user()
+    if user:
+        # A profile's own Eden user: the folder is known, never a guess.
+        if 'error' in user:
+            return None
+        dirs = eden_data_dirs(extra_data_dir)
+        if not dirs:
+            return None
+        return dirs[0].joinpath(*_EDEN_SAVE_ROOT, '0' * 16, user['save_dir'], title_id.upper())
     users, first = set(), None
     for data_dir in eden_data_dirs(extra_data_dir):
         root = data_dir.joinpath(*_EDEN_SAVE_ROOT, '0' * 16)

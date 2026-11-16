@@ -51,7 +51,11 @@ per-launch overlay (`ludo-launch.cfg`); `retroarch.cfg` is never changed for
 it. Ludo's Steam tiles go into the `userdata` of the Steam account using the
 profile.
 
-Eden (Switch) keeps one set of saves per machine, so for now only the first
-profile syncs Switch saves with RomM; other profiles leave them alone rather
-than upload one person's progress to another person's account. Cemu saves are
-not synced by Ludo.
+Switch saves are kept per profile through Eden's own users. The first profile
+keeps the user Eden already had selected; every other profile gets an Eden
+user of its own, added to Eden's user list (named after the profile) the first
+time it is needed, while Eden is closed. Ludo starts Eden with `-u` for that
+user and syncs only that user's save folder
+(`nand/user/save/0000000000000000/<user>/<title>`). Eden allows eight users;
+until a profile has one (Eden never started yet, or all eight taken), Ludo
+leaves Switch saves alone for it. Cemu saves are not synced by Ludo.

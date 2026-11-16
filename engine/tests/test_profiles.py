@@ -226,15 +226,6 @@ class ProfilesTest(unittest.TestCase):
         finally:
             P.launch = None
 
-    def test_only_the_first_profile_syncs_the_shared_eden_saves(self):
-        from romm_sync_engine.sync_core import AutoSyncManager
-        self.assertTrue(AutoSyncManager._eden_saves_are_ours())
-        mia = P.create('Mia')
-        paths._locked, paths._profile_locked, paths._profile = False, False, P.DEFAULT
-        paths.set_profile(mia)
-        self.assertFalse(AutoSyncManager._eden_saves_are_ours())
-        self.assertEqual(AutoSyncManager._eden_inventory_entries(object.__new__(AutoSyncManager)), [])
-
     def test_ids_cannot_escape_the_profiles_folder(self):
         for bad in ('../x', '.hidden', 'a/b', ''):
             with self.assertRaises(ValueError):

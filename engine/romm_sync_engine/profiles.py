@@ -203,6 +203,89 @@ def steam_config_dir():
     return None
 
 
+# ── Eden (Switch) users ────────────────────────────────────────────────────
+#
+# Eden keeps saves per Switch user, so each profile plays as its own Eden
+# user: the first profile keeps the user Eden already had selected, every
+# other profile gets one Ludo adds (named after the profile). Launches pass
+# that user with -u, and sync only looks at that user's save folder.
+
+def profiles_in_use():
+    """True when this shell has profiles and the machine has more than one."""
+    if launch is None:
+        return False
+    return len(load()['profiles']) > 1
+
+
+def _eden_dirs():
+    from . import eden_users, emulator_saves
+    return [d for d in emulator_saves.eden_data_dirs()
+            if eden_users.users(d) is not None]
+
+
+def eden_user(create=False):
+    """The Eden user the current profile plays as.
+
+    None when profiles are not in use: callers behave exactly as before.
+    Otherwise {'uuid', 'save_dir'} for the user, or {'error': reason} when
+    none can be settled yet (Eden never started, all eight users taken, or
+    Eden running when one would have to be added). With an error, Switch
+    saves are left alone rather than guessed.
+    """
+    if not profiles_in_use():
+        return None
+    from . import eden_config, eden_users, emulator_saves
+    dirs = _eden_dirs()
+    if not dirs:
+        return {'error': 'Start Eden once so it creates its user list'}
+    current = paths.profile_id()
+    data = load()
+    entry = get(data, current)
+    if entry is None:
+        return {'error': 'Unknown profile'}
+    uuid = entry.get('eden_user')
+    if not uuid and current == DEFAULT:
+        # The first profile keeps whoever Eden had selected: their saves are
+        # already under that user.
+        listed = eden_users.users(dirs[0]) or []
+        try:
+            index = int(eden_config._setting('[System]', 'current_user') or 0)
+        except ValueError:
+            index = 0
+        chosen = listed[index] if 0 <= index < len(listed) else (listed[0] if listed else None)
+        if chosen is None:
+            return {'error': 'Eden has no users'}
+        uuid = chosen['uuid']
+        entry['eden_user'] = uuid
+        save(data)
+    missing = [d for d in dirs if eden_users.find(d, uuid) is None] if uuid else dirs
+    if missing:
+        if not create:
+            return {'error': 'This profile has no Eden user yet'}
+        if emulator_saves.eden_is_running():
+            return {'error': 'Close Eden so Ludo can add this profile as an Eden user'}
+        name = entry.get('name') or entry.get('username') or 'Player'
+        try:
+            for d in missing:
+                uuid = eden_users.add(d, name, uuid)
+        except eden_users.EdenUsersError as e:
+            return {'error': str(e)}
+        entry['eden_user'] = uuid
+        save(data)
+    return {'uuid': uuid, 'save_dir': eden_users.save_dir_name(uuid)}
+
+
+def eden_launch_index(data_dir):
+    """Eden's -u value for the current profile in the install at ``data_dir``,
+    or None to launch as before."""
+    user = eden_user(create=True)
+    if not user or 'uuid' not in user:
+        return None
+    from . import eden_users
+    found = eden_users.find(data_dir, user['uuid'])
+    return found['index'] if found else None
+
+
 # ── Choosing and changing profiles ─────────────────────────────────────────
 
 def resolve(requested=None, env=None):
