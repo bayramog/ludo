@@ -15,7 +15,7 @@ import copy
 from functools import wraps
 from pathlib import Path
 
-from .paths import app_id, cache_dir, client_name, config_dir, library_dir
+from .paths import app_id, cache_dir, client_name, config_dir, library_dir, machine_cache_dir, profile_id
 from .save_channels import snapshots_supported
 from . import events as _events
 from . import (eden_config, emulator_saves, folder_saves, gamecube_saves,
@@ -8291,6 +8291,18 @@ class RetroArchInterface:
             })
         return stale
 
+    @staticmethod
+    def _profile_save_dirs():
+        """This profile's own save/state folders, or None for the default profile.
+
+        RetroArch has one retroarch.cfg for everyone on the machine, so a
+        second profile's folders are never written there: the launch overlay
+        hands them to RetroArch for each session, and everything that asks
+        where RetroArch keeps saves gets the same answer from here.
+        """
+        from . import profiles
+        return profiles.save_dirs(profile_id())
+
     def _retroarch_cfg_value(self, key):
         """One key out of the detected install's retroarch.cfg, or ''.
 
@@ -8300,6 +8312,9 @@ class RetroArchInterface:
         value starting with ':' is relative to the content directory, neither of
         which is a path we can hand to a folder picker.
         """
+        own = self._profile_save_dirs()
+        if own and key in ('savefile_directory', 'savestate_directory'):
+            return str(own['saves' if key == 'savefile_directory' else 'states'])
         try:
             cfg_dir = self.find_retroarch_config_dir()
             if not cfg_dir:
@@ -8495,6 +8510,11 @@ class RetroArchInterface:
         Returns {'changed': bool, 'saves': str, 'states': str, 'reason': str}.
         """
         out = {'changed': False, 'saves': '', 'states': '', 'reason': ''}
+        own = self._profile_save_dirs()
+        if own:
+            out.update(saves=str(own['saves']), states=str(own['states']),
+                       reason='This profile passes its own folders at launch')
+            return out
         exe = (self.retroarch_executable or '').lower()
         if not exe:
             out['reason'] = 'no emulator detected'
@@ -9840,6 +9860,12 @@ class RetroArchInterface:
             combo = self._menu_toggle_combo()
             if combo:
                 lines.append(f'input_menu_toggle_gamepad_combo = "{combo}"')
+            own = self._profile_save_dirs()
+            if own:
+                for path in own.values():
+                    path.mkdir(parents=True, exist_ok=True)
+                lines += [f'savefile_directory = "{own["saves"]}"',
+                          f'savestate_directory = "{own["states"]}"']
             # ensure_content_save_sorting can't run without a retroarch.cfg, so
             # the first session gets the same two values here.
             if self._unconfigured_tree():
@@ -10302,6 +10328,11 @@ class RetroArchInterface:
         Returns:
             dict: Dictionary with 'saves' and/or 'states' keys pointing to configured paths
         """
+        own = self._profile_save_dirs()
+        if own:
+            for path in own.values():
+                path.mkdir(parents=True, exist_ok=True)
+            return dict(own)
         save_dirs = {}
         config_file = config_dir / 'retroarch.cfg'
 
@@ -10346,6 +10377,11 @@ class RetroArchInterface:
 
     def find_retroarch_dirs(self):
         """Find RetroArch save directories with comprehensive installation support"""
+        own = self._profile_save_dirs()
+        if own:
+            for path in own.values():
+                path.mkdir(parents=True, exist_ok=True)
+            return dict(own)
         save_dirs = {}
 
         # First, try to get the config directory and read configured paths
@@ -10852,7 +10888,7 @@ class RetroArchInterface:
             self._buildbot_index_cache = {}
             return {}
 
-        cache_file = cache_dir() / 'libretro_core_index.json'
+        cache_file = machine_cache_dir() / 'libretro_core_index.json'
         if not force_refresh:
             try:
                 blob = json.loads(cache_file.read_text(encoding='utf-8'))
@@ -10897,7 +10933,7 @@ class RetroArchInterface:
         """The last core list saved to disk, however old, or {}."""
         base, _ext = self._buildbot_base()
         try:
-            blob = json.loads((cache_dir() / 'libretro_core_index.json')
+            blob = json.loads((machine_cache_dir() / 'libretro_core_index.json')
                               .read_text(encoding='utf-8'))
             return blob['cores'] if blob.get('base') == base else {}
         except Exception:
@@ -11456,7 +11492,7 @@ class RetroArchInterface:
             if not info_dir.is_dir() or not os.access(info_dir, os.W_OK):
                 return
 
-            bundle = cache_dir() / 'libretro_info.zip'
+            bundle = machine_cache_dir() / 'libretro_info.zip'
             if (not bundle.exists()
                     or time.time() - bundle.stat().st_mtime > 86400):
                 r = requests.get('https://buildbot.libretro.com/assets/frontend/info.zip',
@@ -15300,6 +15336,18 @@ class AutoSyncManager:
                 return RomMClient.compute_content_hash(packed) if packed else None
         return None
 
+    @staticmethod
+    def _eden_saves_are_ours():
+        """Whether this profile may sync Eden's saves.
+
+        Eden keeps one save tree per machine, not per profile. Syncing it from
+        a second profile would upload the first person's Switch saves to the
+        second person's RomM account, and restore theirs over the first
+        person's. Until Eden saves are kept per profile, only the first
+        profile (the one that existed before profiles) syncs them.
+        """
+        return profile_id() == 'default'
+
     def _eden_inventory_entries(self):
         """Inventory rows for Eden's Switch saves, packed one zip per game.
 
@@ -15324,6 +15372,8 @@ class AutoSyncManager:
         stays read-only — nothing in this method writes into Eden's tree.
         """
         entries = []
+        if not self._eden_saves_are_ours():
+            return entries
         # Eden flushes a Switch save when the game exits, not continuously, so
         # anything on disk mid-session is a partial picture of a save the
         # emulator still holds in memory. Packing it would upload a stale
@@ -15445,7 +15495,7 @@ class AutoSyncManager:
                         and emulator_saves.keys_are_current(entry)):
                     continue
                 path = bios.download_firmware_entry(
-                    entry, cache_dir() / 'firmware' / entry['file_name'],
+                    entry, machine_cache_dir() / 'firmware' / entry['file_name'],
                     progress=progress)
                 if not path:
                     raise ValueError('download failed')
@@ -15627,7 +15677,7 @@ class AutoSyncManager:
                                 if key_count else f"{entry.get('file_name')} is already installed")}
 
         archive = bios.download_firmware_entry(
-            entry, cache_dir() / 'firmware' / entry['file_name'], progress=progress)
+            entry, machine_cache_dir() / 'firmware' / entry['file_name'], progress=progress)
         if not archive:
             return {'status': 'failed', 'keys': key_count,
                     'message': f"Could not download {entry.get('file_name')}"}
@@ -16830,6 +16880,8 @@ class AutoSyncManager:
             return self._restore_gci_save(op, device_id, session_id)
         if self._is_folder_op(op):
             return self._restore_folder_save(op, device_id, session_id)
+        if not self._eden_saves_are_ours():
+            return False
         file_name = op.get('file_name') or ''
         # is_switch_title_id is the save-directory test specifically: Eden files
         # a save under the BASE title, never an update or DLC id.
@@ -20275,6 +20327,13 @@ class SteamShortcutManager:
                 self._userdata_path_cache = p
                 return p
 
+        # With profiles, the Steam account using this profile, not a guess.
+        from . import profiles
+        linked = profiles.steam_config_dir()
+        if linked:
+            self._userdata_path_cache = linked
+            return linked
+
         # Auto-detect Steam userdata
         steam_roots = [
             Path.home() / '.steam' / 'steam' / 'userdata',
@@ -21264,7 +21323,13 @@ def find_steam_config_dir():
     Scans the usual install roots and picks the user with the most recently
     touched shortcuts.vdf, falling back to any user whose config dir exists but
     who has no shortcuts yet. Returns a Path or None.
+
+    With profiles, the Steam account using the current profile comes first.
     """
+    from . import profiles
+    linked = profiles.steam_config_dir()
+    if linked:
+        return linked
     steam_roots = [
         Path.home() / '.steam' / 'steam' / 'userdata',
         Path.home() / '.local' / 'share' / 'Steam' / 'userdata',

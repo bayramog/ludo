@@ -32,7 +32,7 @@ import zipfile
 from pathlib import Path
 
 from . import title_ids
-from .paths import cache_dir
+from .paths import machine_cache_dir
 
 log = logging.getLogger(__name__)
 
@@ -321,7 +321,7 @@ def _firmware_marker_path():
     stray file there is our bookkeeping leaking into another application's
     system tree.
     """
-    return cache_dir() / 'firmware' / 'installed.json'
+    return machine_cache_dir() / 'firmware' / 'installed.json'
 
 
 def read_firmware_marker():
@@ -348,7 +348,7 @@ def write_firmware_marker(file_name, md5, nca_count):
 
 
 def _keys_marker_path():
-    return cache_dir() / 'firmware' / 'keys.json'
+    return machine_cache_dir() / 'firmware' / 'keys.json'
 
 
 def read_keys_marker():

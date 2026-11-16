@@ -12,6 +12,7 @@ import { _broadcastLibRefresh } from "./events";
 import { V2_FOCUS_STYLE } from "./focus";
 import { BiosDetailModal } from "./pages/bios";
 import { _lsAvail } from "./storage";
+import { ProfilePickerModal, SwitchProfileRow } from "./profiles";
 // The bar across the top of the library, and the menus it opens.
 //
 // It is one component rather than per-page chrome because it has to stay put
@@ -525,6 +526,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
             </div>
           </div>
           <div style={{ height: '1px', background: V2.border, margin: '0 4px 4px' }} />
+          <SwitchProfileRow onOpen={() => { closeModal?.(); showModal(<ProfilePickerModal />); }} />
           <UserMenuRow icon={<FaDownload size={15} />}
             label={`Downloads${dlGlimpse.count > 0 ? ` (${dlGlimpse.count})` : ''}`}
             onSelect={() => go("/romm-sync-downloads")} />

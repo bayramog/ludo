@@ -39,6 +39,7 @@ from .release_token import release_token
 # keeps ~/.config/ludo; it shares nothing with the GTK app.
 from romm_sync_engine import paths as _paths  # noqa: E402
 from romm_sync_engine import events as _events  # noqa: E402
+from romm_sync_engine import profiles as _profiles  # noqa: E402
 _paths.set_app_id("ludo")
 _paths.set_client_name("Ludo")
 # Downloads, covers and generated icons go under ~/Ludo rather than the GTK
@@ -4434,6 +4435,11 @@ class LudoBackend:
         payload = self._account_user_payload(user)
         if payload:
             self._account_user_cache = {'user': payload, 'at': time.time()}
+            if _profiles.launch is not None and payload['username'] != self._ANON_USERNAME:
+                try:
+                    _profiles.set_identity(_paths.profile_id(), payload['username'], payload['role'])
+                except Exception as e:
+                    logging.warning(f"profiles: could not cache identity: {e}")
         return payload
 
     async def _refresh_account_user_cache(self):
@@ -4549,10 +4555,134 @@ class LudoBackend:
                 mimetypes.guess_type(ap)[0] or 'image/png'
             uri = f"data:{mime};base64,{base64.b64encode(resp.content).decode('ascii')}"
             self._cover_cache_put(ck, uri)
+            self._remember_profile_avatar(uri)
             return {'data_uri': uri}
         except Exception as e:
             logging.error(f"get_avatar error: {e}", exc_info=True)
             return {'data_uri': None}
+
+    # -----------------------------------------------------------------------
+    # Profiles (desktop only; see romm_sync_engine.profiles)
+    # -----------------------------------------------------------------------
+
+    _PROFILE_AVATAR = 'avatar.uri'
+
+    def _remember_profile_avatar(self, uri):
+        """Keep the signed-in account's avatar beside the profile, so the
+        picker can show everyone's face without signing anyone in."""
+        if _profiles.launch is None:
+            return
+        try:
+            target = _paths.config_dir() / self._PROFILE_AVATAR
+            if not target.exists() or target.read_text(encoding='ascii') != uri:
+                target.write_text(uri, encoding='ascii')
+        except Exception as e:
+            logging.warning(f"profiles: could not keep avatar: {e}")
+
+    def _profile_view(self, entry, data, accounts):
+        pid = entry['id']
+        avatar = None
+        try:
+            avatar = (_paths.profile_dir(pid) / self._PROFILE_AVATAR).read_text(encoding='ascii') or None
+        except OSError:
+            pass
+        steam = []
+        for account, owner in data['steam'].items():
+            if owner == pid:
+                info = accounts.get(account) or {}
+                steam.append(info.get('account_name') or info.get('persona') or account)
+        signed_in = (_paths.profile_dir(pid) / 'settings.ini').exists() and bool(entry.get('username'))
+        return {
+            'id': pid,
+            'name': entry.get('name') or entry.get('username') or 'New profile',
+            'custom_name': bool(entry.get('name')),
+            'username': entry.get('username') or '',
+            'role': entry.get('role') or '',
+            'avatar': avatar,
+            'steam': steam,
+            'signed_in': signed_in,
+            'current': pid == _paths.profile_id(),
+            'removable': pid != _profiles.DEFAULT and pid != _paths.profile_id(),
+        }
+
+    async def get_profiles(self):
+        """The profile list for the switcher, or {'supported': False} where the
+        shell has a single profile (the Deck plugin)."""
+        launch = _profiles.launch
+        if launch is None:
+            return {'supported': False}
+        data = _profiles.load()
+        accounts = _profiles.steam_accounts()
+        steam = None
+        if launch.get('steam'):
+            info = accounts.get(launch['steam']) or {}
+            steam = {'id': launch['steam'],
+                     'name': info.get('account_name') or info.get('persona') or launch['steam']}
+        return {
+            'supported': True,
+            'current': _paths.profile_id(),
+            'ask': bool(launch.get('ask')),
+            'steam': steam,
+            'profiles': [self._profile_view(p, data, accounts) for p in data['profiles']],
+        }
+
+    async def switch_profile(self, profile_id):
+        """Choose a profile. Returns {'status': 'reload'} when the shell must
+        restart the backend to open it, 'ok' when it is already open (the
+        choice still links the Steam account that launched the app)."""
+        launch = _profiles.launch
+        if launch is None:
+            return {'status': 'unsupported'}
+        try:
+            _profiles.choose(profile_id, steam=launch.get('steam'))
+        except ValueError as e:
+            return {'status': 'error', 'message': str(e)}
+        launch['ask'] = False
+        if profile_id == _paths.profile_id():
+            # Already open: the one-shot would only matter on the next launch,
+            # where the Steam link or 'last' already lands here.
+            data = _profiles.load()
+            data.pop('next', None)
+            _profiles.save(data)
+            return {'status': 'ok'}
+        return {'status': 'reload'}
+
+    async def create_profile(self, name=''):
+        """Add a signed-out profile and open it; sign-in happens in setup."""
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        try:
+            pid = _profiles.create(name)
+        except Exception as e:
+            logging.error(f"create_profile failed: {e}", exc_info=True)
+            return {'status': 'error', 'message': str(e)}
+        result = await self.switch_profile(pid)
+        result['id'] = pid
+        return result
+
+    async def rename_profile(self, profile_id, name):
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        try:
+            _profiles.rename(profile_id, name)
+        except ValueError as e:
+            return {'status': 'error', 'message': str(e)}
+        return {'status': 'ok'}
+
+    async def remove_profile(self, profile_id):
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        try:
+            _profiles.remove(profile_id)
+        except ValueError as e:
+            return {'status': 'error', 'message': str(e)}
+        return {'status': 'ok'}
+
+    async def unlink_profile_steam(self, profile_id):
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        _profiles.unlink_steam(profile_id)
+        return {'status': 'ok'}
 
     # -----------------------------------------------------------------------
     # Play time
@@ -11729,7 +11859,7 @@ class LudoBackend:
             if f:
                 text = f.read_text(encoding='utf-8', errors='replace')
             else:
-                bundle = _paths.cache_dir() / 'libretro_info.zip'
+                bundle = _paths.machine_cache_dir() / 'libretro_info.zip'
                 if bundle.exists():
                     import zipfile
                     with zipfile.ZipFile(bundle) as z:
@@ -11771,7 +11901,7 @@ class LudoBackend:
                 result = self._parse_required_firmware(
                     f.read_text(encoding='utf-8', errors='replace'))
             else:
-                bundle = _paths.cache_dir() / 'libretro_info.zip'
+                bundle = _paths.machine_cache_dir() / 'libretro_info.zip'
                 if bundle.exists():
                     import zipfile
                     with zipfile.ZipFile(bundle) as z:
