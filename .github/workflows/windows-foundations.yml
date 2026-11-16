@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   paths-settings:
-    name: Paths and settings (${{ matrix.os }}, Python ${{ matrix.python }})
+    name: Paths, settings and locks (${{ matrix.os }}, Python ${{ matrix.python }})
     strategy:
       fail-fast: false
       matrix:
@@ -24,8 +24,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - name: Install the shared engine
-        run: python -m pip install -e engine
+      - name: Record native runtime
+        run: python -c "import platform, sys; print(platform.platform()); print(sys.version)"
+      - name: Install the shared engine and backend tests
+        run: |
+          python -m pip install -e engine
+          python -m pip install -e "app[test]"
       # These scripts isolate HOME, USERPROFILE and both app-data roots before
       # importing the engine. This is native Windows CI, not a claim that the
       # complete app has passed Windows 11 desktop acceptance (F0-02/F5-04).
@@ -33,3 +37,7 @@ jobs:
         run: python engine/tests/test_windows_paths.py
       - name: Existing credential key compatibility
         run: python engine/tests/test_settings_key.py
+      - name: Native process locks and autosync ownership
+        run: python engine/tests/test_process_lock.py
+      - name: Backend install ownership and actual download shutdown
+        run: python -m pytest -q app/tests/test_device_installs.py
