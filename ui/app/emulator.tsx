@@ -36,6 +36,7 @@ export type EmuStatus = {
   // Independent of `installed` above: their games play with no RetroArch here.
   standalone: EmuStandalone[];
   save_dirs: Record<string, string>;
+  retroarch_save_dir?: string;
   bios_dir: string;
   // Raw configured values by kind — '' means "not set, we detect it".
   configured_paths: Record<string, string>;
@@ -95,6 +96,7 @@ export async function loadEmulatorStatus(refresh = false): Promise<EmuStatus | n
           stale_paths: r.stale_paths || [],
           standalone: r.standalone || [],
           save_dirs: r.save_dirs || {},
+          retroarch_save_dir: r.retroarch_save_dir || '',
           bios_dir: r.bios_dir || '',
           configured_paths: r.configured_paths || {},
           default_paths: r.default_paths || {},

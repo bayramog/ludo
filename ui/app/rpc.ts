@@ -35,6 +35,8 @@ export const notifyNetworkState = callable<[boolean], any>("notify_network_state
 // uploads) and absent on collection-wide ones.
 export const drainNotifications = callable<[], { events: Array<{ kind: string, title: string, body: string, timestamp: number, rom_id?: number | null, has_cover?: boolean, critical?: boolean, action?: { kind: string, platform?: string } | null }> }>("drain_notifications");
 export const refreshFromRomm = callable<[boolean], any>("refresh_from_romm");
+export const getRegionOrder = callable<[], any>("get_region_order");
+export const setRegionOrder = callable<[string[]], any>("set_region_order");
 export const rebuildLibrary = callable<[], any>("rebuild_library");
 // Re-reads one platform and reconciles that slice. Takes a slug (what the
 // platform groups are keyed by) or a numeric id.

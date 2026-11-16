@@ -12,7 +12,7 @@ import { V2Focus, V2_FOCUS_STYLE} from "./focus";
 import { CoverPip, GameCover, ScreenshotArt, awaitCover, peekCover, qGetImageBg } from "./media";
 import { cancelDetailPrefetch, scheduleDetailPrefetch } from "./detailcache";
 import { PlatformIcon, ProgressRing, UserMenuRow, MODAL_SCRIM_INSET, PickerModal, ToastCover} from "./kit";
-import { FaBookmark, FaBoxOpen, FaCheck, FaChevronLeft, FaChevronRight, FaClone, FaCloudUploadAlt, FaDownload, FaEllipsisH, FaGlobe, FaInfoCircle, FaPlay, FaSync, FaTrash, FaUnlink, FaGamepad, FaMicrochip, FaStopwatch} from "react-icons/fa";
+import { FaBan, FaBookmark, FaBoxOpen, FaCheck, FaChevronLeft, FaChevronRight, FaClone, FaCloudUploadAlt, FaDownload, FaEllipsisH, FaGlobe, FaInfoCircle, FaPlay, FaSync, FaTrash, FaUnlink, FaGamepad, FaMicrochip, FaStopwatch} from "react-icons/fa";
 import { _broadcastLibRefresh } from "./events";
 import { MdFlashOn } from "react-icons/md";
 import { _forceGamepadFocus } from "./shell";
@@ -232,33 +232,43 @@ function regionToEmoji(region: string): string {
 
 function openRegionPicker(
   romId: number, gameName: string,
-  siblings: { rom_id: number; name: string; fs_name_no_ext?: string }[],
+  siblings: { rom_id: number; name: string; fs_name_no_ext?: string; fs_extension?: string }[],
   downloadedIds: Set<number>,
   lastUsedId?: number,
   onSelected?: (sibRomId: number) => void,
   mainFile?: string,
   mainDownloaded?: boolean,
+  noFileIds?: Set<number>,
 ) {
-  const mainEntry = { rom_id: romId, name: gameName, file: mainFile?.replace(/\.[^.]+$/, '') };
+  const mainEntry = { rom_id: romId, name: gameName, file: mainFile?.replace(/\.[^.]+$/, ''),
+    ext: mainFile?.match(/\.([^.]+)$/)?.[1] };
   const sorted = [...siblings].sort((a, b) => {
     const aDl = downloadedIds.has(a.rom_id) ? 0 : 1;
     const bDl = downloadedIds.has(b.rom_id) ? 0 : 1;
     if (aDl !== bDl) return aDl - bDl;
     return a.name.localeCompare(b.name);
   });
-  const all = [mainEntry, ...sorted.map((s) => ({ ...s, file: s.fs_name_no_ext }))];
+  // Versions RomM has no file for go last: they can't be downloaded.
+  const noFile = (id: number) => !!noFileIds?.has(id);
+  const listed = [mainEntry, ...sorted.map((s) => ({ ...s, file: s.fs_name_no_ext, ext: s.fs_extension }))];
+  const all = [...listed.filter((e) => !noFile(e.rom_id)), ...listed.filter((e) => noFile(e.rom_id))];
   // Versions of one game usually share its title (two Wii U formats of Terraria
   // are both "Terraria"), so the title cannot tell the rows apart. Their file
   // names can, and are only shown when the titles actually collide.
   const names = all.map((e) => e.name);
   const clash = names.some((n, i) => names.indexOf(n) !== i);
+  // The same file in two formats: only the extension tells them apart.
+  const base = (e: typeof all[number]) => (clash && e.file ? e.file : e.name);
+  const bases = all.map(base);
+  const baseClash = (e: typeof all[number]) => !!e.ext && bases.indexOf(base(e)) !== bases.lastIndexOf(base(e));
 
   showModal(
     <PickerModal title="Select region" items={all.map((entry) => ({
       key: entry.rom_id,
-      label: (clash && entry.file ? entry.file : entry.name)
-        + (!(entry.rom_id === romId ? mainDownloaded : downloadedIds.has(entry.rom_id)) ? ' (not downloaded)' : ''),
-      active: entry.rom_id === lastUsedId,
+      label: base(entry) + (baseClash(entry) ? ` (.${entry.ext})` : '')
+        + (noFile(entry.rom_id) ? ' (no file)'
+          : !(entry.rom_id === romId ? mainDownloaded : downloadedIds.has(entry.rom_id)) ? ' (not downloaded)' : ''),
+      active: entry.rom_id === lastUsedId && !noFile(entry.rom_id),
       onSelect: () => onSelected?.(entry.rom_id),
     }))} />
   );
@@ -364,6 +374,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
   const [activeRegionId, setActiveRegionId] = useState<number>(game.rom_id);
   const [downloadedRegionIds, setDownloadedRegionIds] = useState<Set<number>>(new Set());
   const siblingFetchTried = useRef(false);
+  const noFileRegionIds = useRef<Set<number>>(new Set());
   const ensureDiscs = async (force?: boolean) => {
     if ((discsTried.current && !force) || !dl) return;
     discsTried.current = true;
@@ -381,6 +392,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
       if (r?.success) {
         const ids = new Set<number>(r.downloaded_ids || []);
         setDownloadedRegionIds(ids);
+        noFileRegionIds.current = new Set<number>(r.no_file_ids || []);
         if (r.last) setActiveRegionId(r.last);
         return ids;
       }
@@ -392,7 +404,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
   const showRegionPicker = async () => {
     const ids = (await ensureSiblings(true)) || downloadedRegionIds;
     openRegionPicker(game.rom_id, game.name, game.sibling_roms || [], ids,
-      activeRegionId, handleRegionSelected, game.file_name, dl);
+      activeRegionId, handleRegionSelected, game.file_name, dl, noFileRegionIds.current);
   };
   // Hold A to open the disc/region picker; a quick press launches. The OK
   // button's onActivate fires on the PRESS edge on Steam Deck, so we can't let
@@ -610,6 +622,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
   };
   const primary = () => {
     if (dl) doLaunch();
+    else if (game.no_server_file) toaster.toast({ title: 'No file', body: 'RomM has no file for this entry.' });
     else doDownload();
   };
 
@@ -691,7 +704,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
       onSecondaryActionDescription="Details"
       onOptionsButton={dl ? requestDelete : undefined}
       onOptionsActionDescription={dl ? (confirmDelete ? 'Confirm delete' : 'Delete') : undefined}
-      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : 'Download'}
+      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : 'Download'}
       onFocus={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); scheduleDetailPrefetch(game.rom_id); if (index !== undefined) onFocusIdx?.(index); _tileFocusScrub(selfRef.current, game.name); }}
       onBlur={() => { setFocused(false); cancelDetailPrefetch(); }}
       onMouseEnter={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); }}
@@ -960,7 +973,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
                  launches while it shows this — the glyph reports what is
                  happening, it does not change what A does. */
               : syncing ? <FaCloudUploadAlt size={15} />
-                : dl ? <FaPlay size={15} style={{ marginLeft: '2px' }} /> : <FaDownload size={15} />}
+                : dl ? <FaPlay size={15} style={{ marginLeft: '2px' }} /> : game.no_server_file ? <FaBan size={15} /> : <FaDownload size={15} />}
         </div>
         {/* Bottom row: Details (X) + Delete (Y, when downloaded) — glass buttons. */}
         <div className="romm-gt-actions" style={{
@@ -1113,7 +1126,7 @@ export const CollectionTile = memo(function CollectionTile({ group, onOpen, focu
       <Menu label={group.label} onCancel={() => { removeArmed.current = false; }}>
         <MenuItem onSelected={async () => {
           const res = await getLibraryGames('collection', group.key).catch(() => null);
-          const missing = res?.success ? (res.games || []).filter((g: LibGame) => !g.is_downloaded).map((g: LibGame) => ({ id: g.rom_id, name: g.name })) : [];
+          const missing = res?.success ? (res.games || []).filter((g: LibGame) => !g.is_downloaded && !g.no_server_file).map((g: LibGame) => ({ id: g.rom_id, name: g.name })) : [];
           if (!missing.length) { toaster.toast({ title: 'Nothing to sync', body: 'All games are already downloaded' }); return; }
           // Shared module-level batch: same job key as the collection page, so
           // opening the collection mid-batch shows the running header progress.

@@ -25,6 +25,7 @@ import { SetupWizard } from "./pages/setup";
 import { primePlatformSummary, SettingsPage } from "./pages/settings";
 import { BiosPage } from "./pages/bios";
 import { PlatformsPage } from "./pages/platforms";
+import { RegionsPage } from "./pages/regions";
 import { PlayTimePage } from "./pages/playtime";
 import { GameDetailPage } from "./pages/game";
 import { LibraryRootPage, LibraryGamesPage } from "./pages/library";
@@ -99,6 +100,7 @@ export function startApp(): { stop: () => void } {
   routerHook.addRoute("/romm-sync-emulators", () => <RouteGuard><EmulatorsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-bios", () => <RouteGuard><BiosPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-platforms", () => <RouteGuard><PlatformsPage /></RouteGuard>, { exact: true });
+  routerHook.addRoute("/romm-sync-regions", () => <RouteGuard><RegionsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-playtime", () => <RouteGuard><PlayTimePage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-downloads", () => <RouteGuard><DownloadsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-library", () => <RouteGuard><LibraryRootPage /></RouteGuard>, { exact: true });
@@ -257,6 +259,7 @@ export function startApp(): { stop: () => void } {
       routerHook.removeRoute("/romm-sync-emulators");
       routerHook.removeRoute("/romm-sync-bios");
       routerHook.removeRoute("/romm-sync-platforms");
+      routerHook.removeRoute("/romm-sync-regions");
       routerHook.removeRoute("/romm-sync-downloads");
       routerHook.removeRoute("/romm-sync-library");
       routerHook.removeRoute("/romm-sync-library/:key");

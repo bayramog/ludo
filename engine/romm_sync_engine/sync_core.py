@@ -11,6 +11,8 @@ import threading
 import pickle
 import time
 import logging
+import copy
+from functools import wraps
 from pathlib import Path
 
 from .paths import app_id, cache_dir, client_name, config_dir, library_dir
@@ -1260,6 +1262,9 @@ def _is_own_appimage(name):
 # folders: older and RetroDECK builds first, the current buildbot build second.
 PS2_CORE_NAMES = ('LRPS2', 'ParaLLEl PS2')
 
+# How long a failed core list fetch stands before anything asks again.
+BUILDBOT_RETRY_SECONDS = 300
+
 STANDALONE_EMULATORS = {
     'eden': {
         'name': 'Eden',
@@ -1772,7 +1777,6 @@ class SettingsManager:
         try:
             from cryptography.fernet import Fernet
             import hashlib
-            import getpass
 
             def _fernet(material):
                 key = hashlib.sha256(material.encode()).digest()
@@ -1785,7 +1789,7 @@ class SettingsManager:
             # getuser() reads $USER/$LOGNAME, which Decky Loader leaves as
             # 'root' for plugins it runs as the user. Values written under that
             # name still decrypt.
-            env_user = getpass.getuser()
+            env_user = self._env_user()
             if env_user != user:
                 self._legacy_ciphers.append(_fernet(f"{env_user}-{self._machine_id()}"))
         except ImportError as e:
@@ -1799,8 +1803,18 @@ class SettingsManager:
             import pwd
             return pwd.getpwuid(os.getuid()).pw_name
         except Exception:
-            import getpass
-            return getpass.getuser()
+            return SettingsManager._env_user()
+
+    @staticmethod
+    def _env_user():
+        """getpass.getuser() without importing getpass: Decky Loader's frozen
+        Python lacks it and falls back to the system's stdlib, which on a newer
+        Python (Fedora 45's 3.15) doesn't even load."""
+        for name in ('LOGNAME', 'USER', 'LNAME', 'USERNAME'):
+            if os.environ.get(name):
+                return os.environ[name]
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
 
     def _machine_id(self):
         """Stable per-installation identifier, independent of hostname."""
@@ -2761,6 +2775,55 @@ def _safe_page_limit(limit):
 # Anything _group_sibling_roms reads must be in here — it needs id, sibling_roms,
 # files, fs_extension, rom_user, name and fs_name — as must anything a caller
 # reads off the returned rows.
+# RomM's region names by its priority shortcodes (handler/filesystem/base_handler.py),
+# and the filename tags it ranks after full releases (models/base.py).
+_REGION_SHORTCODES = {
+    'au': ('Australia',), 'asi': ('Asia',), 'br': ('Brazil',), 'ca': ('Canada',),
+    'cn': ('China',), 'uk': ('England',), 'eu': ('Europe',), 'fi': ('Finland',),
+    'fr': ('France',), 'de': ('Germany',), 'gr': ('Greece',), 'nl': ('Holland', 'Netherlands'),
+    'hk': ('Hong Kong',), 'it': ('Italy',), 'jp': ('Japan',), 'kr': ('Korea',),
+    'no': ('Norway',), 'ru': ('Russia',), 'sp': ('Spain',), 'se': ('Sweden',),
+    'tw': ('Taiwan',), 'us': ('USA',), 'wor': ('World',), 'ame': ('Americas',),
+    'bg': ('Bulgaria',), 'cl': ('Chile',), 'cz': ('Czech Republic',), 'dk': ('Denmark',),
+    'hu': ('Hungary',), 'il': ('Israel',), 'kw': ('Kuwait',), 'mor': ('Middle East',),
+    'nz': ('New Zealand',), 'oce': ('Oceania',), 'pe': ('Peru',), 'pl': ('Poland',),
+    'pt': ('Portugal',), 'sk': ('Slovakia',), 'tr': ('Turkey',),
+}
+_PRERELEASE_TAGS = ('demo', 'beta', 'proto', 'sample', 'kiosk', 'preview')
+
+
+def region_ranks_for_priority(codes):
+    """{lowercase region name: rank} for RomM's SCAN_REGION_PRIORITY. Unknown
+    codes such as "ss" add nothing and don't shift the ranks after them."""
+    ranks = {}
+    rank = 0
+    for code in dict.fromkeys(str(c).lower() for c in codes or []):
+        names = _REGION_SHORTCODES.get(code)
+        if names:
+            ranks.update({n.lower(): rank for n in names})
+            rank += 1
+    return ranks
+
+
+def region_names_for_priority(codes):
+    """One display name per known code in RomM's SCAN_REGION_PRIORITY."""
+    return [_REGION_SHORTCODES[c][0]
+            for c in dict.fromkeys(str(c).lower() for c in codes or [])
+            if c in _REGION_SHORTCODES]
+
+
+ALL_REGION_NAMES = sorted(n for names in _REGION_SHORTCODES.values() for n in names[:1])
+
+
+def filename_region_rank(file_name, ranks):
+    """Best rank among a filename's region tags: "Game (USA, Europe).nds"."""
+    best = len(ranks) + 1
+    for tag in re.findall(r'\(([^)]*)\)', file_name or ''):
+        for name in tag.split(','):
+            best = min(best, ranks.get(name.strip().lower(), best))
+    return best
+
+
 ROM_TRIM_FIELDS = (
     'id', 'name', 'fs_name', 'fs_name_no_ext', 'fs_extension', 'fs_size_bytes',
     'platform_id', 'platform_slug', 'files',
@@ -2785,6 +2848,9 @@ ROM_TRIM_FIELDS = (
     # this device has never downloaded — see _rom_id_for_title_id. Absent on
     # older servers, where the trim simply drops them.
     'title_id', 'save_target',
+    # False when RomM has an entry but no file behind it, so a download can only
+    # fail. Absent on older servers, which means "has a file".
+    'has_file_on_disk',
 )
 
 
@@ -3065,12 +3131,81 @@ class ReachabilityLatch:
 DEVICE_CAPABILITIES = {'remote_install': True}
 
 
+_io_local = threading.local()
+
+
+@contextmanager
+def romm_io_cancellation(check):
+    previous = getattr(_io_local, 'check', None)
+    _io_local.check = check
+    try:
+        yield
+    finally:
+        _io_local.check = previous
+
+
+class _OperationSession(requests.Session):
+    def __init__(self, *, read_only=None):
+        super().__init__()
+        self._read_only = (bool(os.environ.get('LUDO_DEV_READ_ONLY'))
+                           if read_only is None else read_only)
+
+    def request(self, method, url, *args, **kwargs):
+        # Sandbox policy belongs to the transport, including isolated workers.
+        if self._read_only and str(method).upper() not in ('GET', 'HEAD', 'OPTIONS'):
+            logging.info(f"[READ-ONLY] blocked {method} {url}")
+            raise requests.exceptions.ConnectionError(
+                f"LUDO_DEV_READ_ONLY blocked {method} {url}")
+        check = getattr(_io_local, 'check', None)
+        if check:
+            check()
+        owner = getattr(self, '_auth_owner', None)
+        if owner is not None:
+            with owner._auth_lock:
+                authorization = owner._session.headers.get('Authorization')
+                if authorization is None:
+                    self.headers.pop('Authorization', None)
+                else:
+                    self.headers['Authorization'] = authorization
+                self.cookies = copy.deepcopy(owner._session.cookies)
+        # A successful refresh must persist its rotated tokens before cancel.
+        return super().request(method, url, *args, **kwargs)
+
+
+def _auth_locked(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        check = getattr(_io_local, 'check', None)
+        if check and method.__name__ != '_watch_auth':
+            check()
+        with self._auth_lock:
+            if check and method.__name__ != '_watch_auth':
+                check()
+            owned = getattr(self._session_local, 'session', None)
+            # Refresh tokens rotate: all authentication uses the original session.
+            self._session_local.session = None
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                self._session_local.session = owned
+                if owned is not None:
+                    authorization = self._session.headers.get('Authorization')
+                    if authorization is None:
+                        owned.headers.pop('Authorization', None)
+                    else:
+                        owned.headers['Authorization'] = authorization
+                    owned.cookies = copy.deepcopy(self._session.cookies)
+    return locked
+
+
 class RomMClient:
     """Client for interacting with RomM API"""
     
     def __init__(self, base_url, username=None, password=None, client_token=None):
         self.base_url = base_url.rstrip('/')
-        self.session = requests.Session()
+        self._auth_lock = threading.RLock()
+        self._session_local = threading.local()
+        self.session = _OperationSession()
         self.authenticated = False
         self.client_token = None  # RomM Client API Token (rmm_...) if used
         # Save types whose /downloaded endpoint this server answered 404 for —
@@ -3094,18 +3229,7 @@ class RomMClient:
         # sign in again instead of telling them the server is down.
         self.auth_rejected = False
         self._refreshing = False
-        self.session.hooks['response'].append(self._watch_auth)
-        # try-dev.sh: a sandbox shares the real account and device, so it may
-        # look but must never change anything on the server.
-        if os.environ.get('LUDO_DEV_READ_ONLY'):
-            _send = self.session.request
-            def _read_only(method, url, *args, **kwargs):
-                if str(method).upper() not in ('GET', 'HEAD', 'OPTIONS'):
-                    logging.info(f"[READ-ONLY] blocked {method} {url}")
-                    raise requests.exceptions.ConnectionError(
-                        f"LUDO_DEV_READ_ONLY blocked {method} {url}")
-                return _send(method, url, *args, **kwargs)
-            self.session.request = _read_only
+        self.session.hooks['response'].extend([self._watch_cookies, self._watch_auth])
         # What /api/heartbeat says the server can do; see get_server_features.
         self.server_features = {}
         # The device a QR pairing's token is bound to (RomM creates one per
@@ -3159,16 +3283,87 @@ class RomMClient:
         
         # Prefer a Client API Token (RomM's recommended companion-app auth) over
         # storing the user's password. Fall back to Basic auth if no token.
-        if client_token:
-            self.authenticate_with_token(client_token)
-        elif username and password:
-            self.authenticate(username, password)
+        try:
+            if client_token:
+                self.authenticate_with_token(client_token)
+            elif username and password:
+                self.authenticate(username, password)
+        except BaseException:
+            self.session.close()
+            raise
+
+    @property
+    def session(self):
+        return getattr(self._session_local, 'session', None) or self._session
+
+    @session.setter
+    def session(self, value):
+        # Some engine consumers build a lightweight client via __new__ + session.
+        if not hasattr(self, '_session_local'):
+            self._session_local = threading.local()
+        if not hasattr(self, '_auth_lock'):
+            self._auth_lock = threading.RLock()
+        self._session = value
+
+    @contextmanager
+    def isolated_session(self):
+        """Own HTTP transport for one worker, with one authoritative auth state.
+
+        Ordinary session users retain their API; thread-local selection never
+        swaps another thread's transport. Legacy background HTTP users still
+        share their original transport, but cannot independently rotate auth.
+        """
+        previous = getattr(self._session_local, 'session', None)
+        owned = _OperationSession(read_only=getattr(self._session, '_read_only', False))
+        try:
+            with self._auth_lock:
+                source = self._session
+                for attr in requests.Session.__attrs__:
+                    if attr not in ('adapters', 'hooks'):
+                        setattr(owned, attr, copy.deepcopy(getattr(source, attr)))
+                for prefix, adapter in source.adapters.items():
+                    owned.mount(prefix, requests.adapters.HTTPAdapter(
+                        pool_connections=adapter._pool_connections,
+                        pool_maxsize=adapter._pool_maxsize,
+                        max_retries=copy.deepcopy(adapter.max_retries),
+                        pool_block=adapter._pool_block))
+                # Do not copy bound hooks from another transport/client.
+                owned.hooks['response'] = [self._watch_cookies, self._watch_auth]
+                owned._auth_owner = self
+            self._session_local.session = owned
+            yield owned
+        finally:
+            self._session_local.session = previous
+            owned.close()
 
     # Endpoints whose 401 means "these credentials are wrong", answered while
     # signing in or pairing, not "the session we had is gone".
     _AUTH_PATHS = ('/api/token', '/api/login', '/api/client-tokens/exchange',
                    '/api/auth/device')
 
+    def _canonical_cookie_header(self, request):
+        probe = copy.copy(request)
+        probe.headers = request.headers.copy()
+        probe.headers.pop('Cookie', None)
+        return requests.cookies.get_cookie_header(self._session.cookies, probe)
+
+    def _watch_cookies(self, response, *args, **kwargs):
+        request = getattr(response, 'request', None)
+        if request is None:
+            return
+        with self._auth_lock:
+            current = (request.headers.get('Authorization') ==
+                       self._session.headers.get('Authorization') and
+                       request.headers.get('Cookie') == self._canonical_cookie_header(request))
+            response._romm_credentials_current = current
+            if current:
+                # Extract the raw headers too: expired cookies remove old entries.
+                # Requests invokes response hooks for each redirect response.
+                requests.cookies.extract_cookies_to_jar(
+                    self._session.cookies, request, response.raw)
+            response._romm_cookie_header = self._canonical_cookie_header(request)
+
+    @_auth_locked
     def _watch_auth(self, response, *args, **kwargs):
         """Session hook: notice the server revoking us mid-session.
 
@@ -3181,6 +3376,12 @@ class RomMClient:
         401 still fails, the next one goes out with the new token. A Client API
         Token has nothing to refresh, so it is marked rejected straight away.
         """
+        check = getattr(_io_local, 'check', None)
+        if check:
+            try:
+                check()
+            except BaseException:
+                return  # Do not start a refresh for an abandoned operation.
         try:
             if (response.status_code != 401 or not self.authenticated
                     or self._refreshing):
@@ -3188,6 +3389,15 @@ class RomMClient:
             path = urlparse(response.url).path
             if not path.startswith('/api/') or path.startswith(self._AUTH_PATHS):
                 return
+            request = getattr(response, 'request', None)
+            if request is not None and request.headers.get('Authorization') != \
+                    self.session.headers.get('Authorization'):
+                return  # A late 401 must not revoke freshly rotated credentials.
+            if request is not None and (
+                    not getattr(response, '_romm_credentials_current', True) or
+                    getattr(response, '_romm_cookie_header', self._canonical_cookie_header(request))
+                    != self._canonical_cookie_header(request)):
+                return  # Likewise for a cookie-only session rotated by another response.
             if self.refresh_token and not self.client_token:
                 self._refreshing = True
                 try:
@@ -3202,6 +3412,7 @@ class RomMClient:
         except Exception as e:
             logging.debug(f"auth watch failed: {e}")
 
+    @_auth_locked
     def authenticate_with_token(self, client_token):
         """Authenticate using a RomM Client API Token (Authorization: Bearer rmm_...).
 
@@ -3352,6 +3563,7 @@ class RomMClient:
             print(f"⚠️ device/token poll error (will retry): {e}")
             return ('pending', None)
 
+    @_auth_locked
     def authenticate(self, username, password):
         """Authenticate with RomM using Basic Auth, Token, or Session fallback"""
         try:
@@ -3456,6 +3668,7 @@ class RomMClient:
             self.authenticated = False
             return False
 
+    @_auth_locked
     def refresh_access_token(self):
         """Refresh the access token using refresh_token"""
         if not self.refresh_token:
@@ -3501,6 +3714,7 @@ class RomMClient:
             self.authenticated = False
             return False
 
+    @_auth_locked
     def ensure_authenticated(self):
         """Ensure token is valid, refresh if needed"""
         import time
@@ -3919,7 +4133,7 @@ class RomMClient:
                     'with_rom_id_index': 'false',
                     'with_char_index': 'false',
                     'with_filter_values': 'false',   # only `items` is read; see _fetch_pages_parallel
-                    'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages'
+                    'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages,has_file_on_disk'
                 },
                 timeout=30
             )
@@ -4093,7 +4307,7 @@ class RomMClient:
                 'with_rom_id_index': 'false',
                 'with_char_index': 'false',
                 'with_filter_values': 'false',   # only `items` is read; see _fetch_pages_parallel
-                'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages'
+                'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages,has_file_on_disk'
             })
             response = self.session.get(
                 urljoin(self.base_url, '/api/roms'),
@@ -4153,6 +4367,42 @@ class RomMClient:
         except Exception as e:
             print(f"Error fetching virtual collection ROMs: {e}")
         return []
+
+    # This device's own region order, when it has one. Set by the app: every
+    # client it creates, for whatever reason, has to honour the same setting.
+    region_order_source = None
+
+    def server_regions(self):
+        """Region names in the server's priority order; [] when unavailable."""
+        if getattr(self, '_server_regions', None) is None:
+            source, RomMClient.region_order_source = RomMClient.region_order_source, None
+            try:
+                self.region_ranks()
+            finally:
+                RomMClient.region_order_source = source
+        return getattr(self, '_server_regions', None) or []
+
+    def region_ranks(self):
+        """The server's region priority as ranks; fetched once per client.
+        {} when unavailable, which leaves groups in their existing order."""
+        source = RomMClient.region_order_source
+        order = source() if source else None
+        if order:
+            return {str(n).lower(): i for i, n in enumerate(order)}
+        cached = getattr(self, '_region_ranks', None)
+        if cached is not None:
+            return cached
+        try:
+            r = self.session.get(urljoin(self.base_url, '/api/config'), timeout=10)
+            if r.status_code != 200:
+                return {}
+            codes = r.json().get('SCAN_REGION_PRIORITY')
+            self._server_regions = region_names_for_priority(codes)
+            self._region_ranks = region_ranks_for_priority(codes)
+            return self._region_ranks
+        except Exception as e:
+            print(f"Could not read region priority: {e}")
+            return {}
 
     def _group_sibling_roms(self, items):
         """Group sibling ROMs (regional variants) under a main ROM
@@ -4261,12 +4511,37 @@ class RomMClient:
                     return (kind, -len(rom.get('files') or []), -size)
                 candidates = sorted(candidates, key=_switch_key)
 
+            # A version RomM has no file for can't be the tile while another
+            # version can be downloaded, not even one marked as main: the whole
+            # game would read as unavailable. Stable, so the order above holds
+            # within each side.
+            def _no_file(rom):
+                return rom.get('has_file_on_disk') is False
+            candidates = sorted(candidates, key=_no_file)
+
+            # Nothing chosen by the user or the group's shape: rank like RomM's
+            # own gallery, so both show the same version. Switch keeps its
+            # base/update/DLC order above.
+            if not (any(_switch_content_row(r) for r in candidates)
+                    or any(not r.get('fs_extension')
+                           or (r.get('rom_user') or {}).get('is_main_sibling')
+                           for r in candidates if not _no_file(r))):
+                ranks = self.region_ranks() if self else {}
+                def _release_key(rom):
+                    name = (rom.get('fs_name') or '').lower()
+                    regions = rom.get('regions') or []
+                    region = str(regions[0]).lower() if regions else ''
+                    return (_no_file(rom),
+                            any(f'({t}' in name for t in _PRERELEASE_TAGS),
+                            ranks.get(region, len(ranks) + 1))
+                candidates = sorted(candidates, key=_release_key)
+
             for rom in candidates:
                 fs_extension = rom.get('fs_extension', '')
                 is_main = rom.get('rom_user', {}).get('is_main_sibling', False)
 
                 # Folder ROMs have no extension or empty extension
-                if not fs_extension or is_main:
+                if (not fs_extension or is_main) and not _no_file(rom):
                     if main_rom is None:
                         main_rom = rom
                     else:
@@ -4291,7 +4566,8 @@ class RomMClient:
             # itself is the single downloadable unit. Groups with no folder ROM
             # (e.g. separate per-region .nsp/.chd ROMs) keep all their siblings.
             has_folder = any(
-                not (r.get('fs_extension') or '') for r in group_roms
+                not (r.get('fs_extension') or '') and not _no_file(r)
+                for r in group_roms
             )
             if has_folder:
                 drop_ids = {
@@ -4886,7 +5162,7 @@ class RomMClient:
                             # so dropping the opt-outs changes nothing there.
                             'with_char_index': 'false',
                             'with_filter_values': 'false',
-                            'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages'
+                            'fields': 'id,name,fs_name,fs_extension,platform_name,platform_slug,files,multi,path_cover_large,path_cover_small,sibling_roms,rom_user,regions,languages,has_file_on_disk'
                         },
                         timeout=timeout
                     )
@@ -5300,6 +5576,8 @@ class RomMClient:
             
             if response.status_code != 200:
                 print(f"ROM download failed with status {response.status_code}")
+                if response.status_code == 404:
+                    return False, "File not found on RomM."
                 return False, f"API download failed: HTTP {response.status_code}"
             
             # Check if we're getting HTML (error page) instead of a ROM file
@@ -7164,6 +7442,7 @@ class RetroArchInterface:
         self._retrodeck_core_map_cache = None
         # Cache for the libretro buildbot's downloadable-core listing (lazy).
         self._buildbot_index_cache = None
+        self._buildbot_index_failed_at = None
         self.retroarch_executable = None
         self.cores_dir = None
         self.save_dirs = {}
@@ -7815,9 +8094,7 @@ class RetroArchInterface:
             print(f"🎮 Using custom RetroArch path: {custom_path}")
 
             # ALSO CHECK FOR CORES RELATIVE TO CUSTOM PATH
-            custom_config_dir = Path(custom_path).parent
-            if (custom_config_dir / 'config/retroarch').exists():
-                custom_config_dir = custom_config_dir / 'config/retroarch'
+            custom_config_dir = self._custom_install_dir(custom_path)
             custom_cores_dir = custom_config_dir / 'cores'
             if custom_cores_dir.exists():
                 self.cores_dir = custom_cores_dir
@@ -7884,6 +8161,11 @@ class RetroArchInterface:
             'cores_dir': str(self.cores_dir or ''),
             'core_count': len(cores),
             'save_dirs': {k: str(v) for k, v in (self.save_dirs or {}).items()},
+            # A real folder here wins over Ludo's own setting (see
+            # align_retroarch_config), so the UI shows it instead of offering a
+            # choice that would have no effect. RetroDECK manages its own config.
+            'retroarch_save_dir': ('' if kind == 'retrodeck'
+                                   else self._retroarch_cfg_value('savefile_directory')),
             'bios_dir': str((self.bios_manager and self.bios_manager.system_dir) or ''),
             'stale_paths': self.stale_emulator_paths(),
             # Standalone emulators, which are a separate axis from 'installed'
@@ -8056,6 +8338,17 @@ class RetroArchInterface:
             return Path.home() / 'snap/retroarch/current/.config/retroarch'
         return Path.home() / '.config' / 'retroarch'
 
+    def _unconfigured_tree(self):
+        """The config tree of a RetroArch that hasn't run yet, or None.
+
+        RetroDECK sets itself up before it can launch anything, and on Windows
+        _install_tree's path means nothing, so neither is in this state.
+        """
+        if IS_WINDOWS or self.find_retroarch_config_dir():
+            return None
+        tree = self._install_tree()
+        return tree if tree and tree.name != 'retrodeck' else None
+
     def expected_bios_dir(self):
         """Where the DETECTED emulator looks for BIOS files, existing or not.
 
@@ -8152,7 +8445,7 @@ class RetroArchInterface:
         return str(library_dir() / ('roms' if kind == 'roms' else 'saves'))
 
     def ensure_save_dirs_exist(self):
-        """Create the emulator's saves/ and states/ folders now, not later.
+        """Create the emulator's saves/, states/ and system/ folders now, not later.
 
         Directory discovery only accepts folders that exist, and a freshly
         installed emulator has none until its first run — so the first session
@@ -8169,7 +8462,10 @@ class RetroArchInterface:
         if not expected:
             return made
         parent = Path(expected).parent
-        for d in (Path(expected), parent / 'states'):
+        dirs = [Path(expected), parent / 'states']
+        if self.expected_bios_dir():
+            dirs.append(Path(self.expected_bios_dir()))
+        for d in dirs:
             try:
                 if not d.is_dir():
                     d.mkdir(parents=True, exist_ok=True)
@@ -8948,6 +9244,15 @@ class RetroArchInterface:
             'neo geo': ['fbneo', 'mame', 'fbalpha'],
             'neo geo cd': ['neocd', 'fbneo'],
             'neo geo pocket': ['beetle_ngp', 'mednafen_ngp'],
+            # RomM's "MSX2", "TurboGrafx-16/PC Engine", "Turbografx-16/PC
+            # Engine CD" (rommapp/ludo#80). The PCE cores run CD games too.
+            'msx': ['bluemsx', 'fmsx'],
+            'pc engine': ['beetle_pce_fast', 'mednafen_pce_fast', 'beetle_pce', 'mednafen_pce'],
+            'turbografx': ['beetle_pce_fast', 'mednafen_pce_fast', 'beetle_pce', 'mednafen_pce'],
+            # No libretro PS3 core. Listed so the longer keyword wins and
+            # "PlayStation 3" no longer falls through to the PS1 cores.
+            'playstation 3': [],
+            'ps3': [],
     }
 
     def standalone_emulator_status(self, platform_name, platform_slug=None):
@@ -9217,7 +9522,9 @@ class RetroArchInterface:
         LRPS2 and the current buildbot one "ParaLLEl PS2", while its .info still
         says LRPS2, so write both: RetroArch ignores the one it does not use.
         """
-        cfg_dir = self.find_retroarch_config_dir()
+        # No retroarch.cfg before the first run, but an options file is safe to
+        # write then and the first session is the one that would use shared cards.
+        cfg_dir = self.find_retroarch_config_dir() or self._unconfigured_tree()
         if not cfg_dir:
             return []
         return [Path(cfg_dir) / 'config' / name / f"{Path(rom_path).stem}.opt"
@@ -9524,12 +9831,20 @@ class RetroArchInterface:
                      '# over its own configuration for this session only.',
                      'network_cmd_enable = "true"',
                      f'network_cmd_port = "{self.port}"']
+            system_dir = getattr(getattr(self, 'bios_manager', None), 'system_dir', None)
+            if system_dir:
+                lines.append(f'system_directory = "{system_dir}"')
             core_dir = self._core_dir_override(core_path)
             if core_dir:
                 lines.append(f'libretro_directory = "{core_dir}"')
             combo = self._menu_toggle_combo()
             if combo:
                 lines.append(f'input_menu_toggle_gamepad_combo = "{combo}"')
+            # ensure_content_save_sorting can't run without a retroarch.cfg, so
+            # the first session gets the same two values here.
+            if self._unconfigured_tree():
+                lines += ['sort_savefiles_enable = "false"',
+                          'sort_savefiles_by_content_enable = "true"']
             overlay.write_text('\n'.join(lines) + '\n', encoding='utf-8')
             return str(overlay)
         except Exception as e:
@@ -9931,6 +10246,9 @@ class RetroArchInterface:
                 pass
             return mode
 
+        # The launch overlay decides this one for a RetroArch that hasn't run.
+        if save_type == 'saves' and self._unconfigured_tree():
+            return 'content'
         # No config yet. Guessing wrong puts the save where the emulator will
         # never read it, so use the best evidence available, in order.
         remembered = ''
@@ -10200,14 +10518,30 @@ class RetroArchInterface:
                     and str(d).startswith(str(Path.home() / 'retrodeck')))]
         return mine + [d for d in live if d not in mine]
 
+    @staticmethod
+    def _custom_install_dir(custom_path):
+        """The folder an emulator path set in Ludo points at: the binary's own
+        folder, or its config/retroarch subfolder when it has one.
+
+        A Flatpak launcher (…/flatpak/exports/bin/<app id>, user or system) is a
+        stub script, not the install: its folder is outside the app's sandbox,
+        so RetroArch couldn't read the per-launch overlay written there. It maps
+        to the app's own ~/.var/app/<app id>/config/retroarch instead.
+        """
+        path = Path(custom_path)
+        if path.parent.name == 'bin' and path.parent.parent.name == 'exports':
+            return Path.home() / '.var/app' / path.name / 'config/retroarch'
+        folder = path.parent
+        if (folder / 'config/retroarch').exists():
+            folder = folder / 'config/retroarch'
+        return folder
+
     def find_retroarch_config_dir(self):
         """Find RetroArch config directory for the detected installation"""
         # Check for custom path override first
         custom_path = self.settings.get('RetroArch', 'custom_path', '').strip()
         if custom_path and Path(custom_path).exists():
-            custom_config_dir = Path(custom_path).parent
-            if (custom_config_dir / 'config/retroarch').exists():
-                custom_config_dir = custom_config_dir / 'config/retroarch'
+            custom_config_dir = self._custom_install_dir(custom_path)
             if custom_config_dir.exists():
                 print(f"🔧 Using custom config directory: {custom_config_dir}")
                 return custom_config_dir
@@ -10501,9 +10835,18 @@ class RetroArchInterface:
         the post-extract integrity check in download_core(). Empty dict when
         offline or on an unsupported platform: callers treat "no downloadable
         cores" as a normal state, never an error.
+
+        A failed fetch is remembered for a few minutes: the core page asks once
+        per platform, and each retry against a blocked host cost a full timeout,
+        which read as "Loading cores..." forever. An expired list still on disk
+        stands in meanwhile.
         """
         if self._buildbot_index_cache is not None and not force_refresh:
             return self._buildbot_index_cache
+        failed_at = self._buildbot_index_failed_at
+        if (failed_at is not None and not force_refresh
+                and time.monotonic() - failed_at < BUILDBOT_RETRY_SECONDS):
+            return self._stale_core_index()
         base, ext = self._buildbot_base()
         if not base:
             self._buildbot_index_cache = {}
@@ -10522,7 +10865,7 @@ class RetroArchInterface:
 
         cores = {}
         try:
-            resp = requests.get(f'{base}/.index-extended', timeout=20)
+            resp = requests.get(f'{base}/.index-extended', timeout=(5, 20))
             resp.raise_for_status()
             suffix = f'_libretro{ext}.zip'
             for line in resp.text.splitlines():
@@ -10536,8 +10879,10 @@ class RetroArchInterface:
                                                'date': date}
         except Exception as e:
             print(f"⚠️ Could not fetch libretro core index: {e}")
-            return {}
+            self._buildbot_index_failed_at = time.monotonic()
+            return self._stale_core_index()
 
+        self._buildbot_index_failed_at = None
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             cache_file.write_text(json.dumps(
@@ -10547,6 +10892,20 @@ class RetroArchInterface:
             pass
         self._buildbot_index_cache = cores
         return cores
+
+    def _stale_core_index(self):
+        """The last core list saved to disk, however old, or {}."""
+        base, _ext = self._buildbot_base()
+        try:
+            blob = json.loads((cache_dir() / 'libretro_core_index.json')
+                              .read_text(encoding='utf-8'))
+            return blob['cores'] if blob.get('base') == base else {}
+        except Exception:
+            return {}
+
+    def core_index_unavailable(self):
+        """True when the last try at the online core list failed."""
+        return self._buildbot_index_failed_at is not None
 
     def repair_retroarch_assets_dir(self):
         """Undo an assets_directory left pointing at an empty folder.
@@ -11045,10 +11404,11 @@ class RetroArchInterface:
                                if m.filename.endswith(f'_libretro{ext}')), None)
                 if member is None:
                     raise ValueError('archive contains no libretro core')
-                # The buildbot index CRC is the extracted core's, so this
-                # verifies the whole chain (download + unzip) in one check.
+                # Nightly builds can change while the cached index is still fresh.
                 if f'{member.CRC:08x}' != entry['crc']:
-                    raise ValueError('checksum mismatch — download corrupted')
+                    entry = self.list_downloadable_cores(force_refresh=True).get(core_name)
+                    if not entry or f'{member.CRC:08x}' != entry['crc']:
+                        raise ValueError('checksum mismatch — download corrupted')
                 payload = z.read(member)
 
             # Write beside the target and rename, so a half-written core is
@@ -11326,7 +11686,10 @@ class RetroArchInterface:
             # round-trip to the verbatim suffix here.
             stripped_full = re.sub(timestamp_pattern, '', original_filename).strip()
             if stripped_full.lower().endswith('.state.auto'):
-                target_filename = stripped_full
+                # Argosy names its autosave slot in the file; RetroArch only reads
+                # "<content>.state.auto".
+                target_filename = re.sub(r'\.autosave(?=\.state\.auto$)', '',
+                                         stripped_full, flags=re.IGNORECASE)
             # Use slot info to determine correct state extension
             elif slot:
                 target_filename = self._state_filename_from_slot(base_name, slot)
@@ -12695,6 +13058,7 @@ class AutoSyncManager:
                         config_dir = Path.home() / '.var/app/net.retrodeck.retrodeck/config/retroarch'
 
                     if not config_dir:
+                        self.should_stop.wait(3)
                         continue
 
                     # Find all playlist files
@@ -12720,11 +13084,11 @@ class AutoSyncManager:
                                 self.log(f"🎯 Library launch: {Path(recent_content).name}")
                                 self.sync_saves_for_rom_file(recent_content)
                     
-                    time.sleep(3)
+                    self.should_stop.wait(3)
                     
                 except Exception as e:
                     self.log(f"Playlist monitoring error: {e}")
-                    time.sleep(10)
+                    self.should_stop.wait(10)
         
         threading.Thread(target=monitor_playlists, daemon=True).start()
 
@@ -13499,6 +13863,8 @@ class AutoSyncManager:
             # Find emulator from file path
             emulator_info = self.retroarch.get_emulator_info_from_path(file_path)
             emulator = emulator_info['romm_emulator']  # Use RomM-compatible name
+            if save_type == 'states' and not emulator:
+                emulator = self._state_emulator(file_path, rom_id)
 
             # Upload the file with thumbnail and emulator info
             slot_info = f" [slot={slot}, autocleanup={autocleanup_limit}]" if slot else ""
@@ -14316,7 +14682,8 @@ class AutoSyncManager:
             # saves. The card stays the thing that changed; the zip is what
             # the server sees.
             upload_path, file_name = path, entry['name']
-            if slugs.get(rom_id) == 'ps2' and path.suffix.lower() == '.ps2':
+            is_ps2_card = slugs.get(rom_id) == 'ps2' and path.suffix.lower() == '.ps2'
+            if is_ps2_card:
                 packed = self._pack_ps2_card(path, rom_id)
                 if packed is None:
                     continue
@@ -14324,6 +14691,8 @@ class AutoSyncManager:
             # A GameCube game's GCIs are one save, packed the way Argosy packs
             # them; the unit is reported once, dated by its newest member.
             if path.suffix.lower() == gamecube_saves.GCI_SUFFIX:
+                if not gamecube_saves.in_card(path):
+                    continue
                 members = gamecube_saves.unit_members(path)
                 unit = (str(path.parent), gamecube_saves.game_code(path))
                 if unit in gci_units:
@@ -14334,7 +14703,8 @@ class AutoSyncManager:
                 updated_at = _dt.datetime.fromtimestamp(
                     max(m.stat().st_mtime for m in members),
                     tz=_dt.timezone.utc).isoformat()
-            content_hash = RomMClient.compute_content_hash(upload_path)
+            content_hash = (self._ps2_reported_hash(rom_id, upload_path) if is_ps2_card
+                            else RomMClient.compute_content_hash(upload_path))
 
             # Use the RomM core name (e.g. "Mupen64Plus-Next"), not the raw save
             # folder name (e.g. "n64"). get_save_files()' retroarch_emulator is
@@ -14470,6 +14840,7 @@ class AutoSyncManager:
         for entry in (self.retroarch.get_save_files() or {}).get('saves', []):
             path = Path(entry['path'])
             if (path.suffix.lower() == gamecube_saves.GCI_SUFFIX
+                    and gamecube_saves.in_card(path)
                     and self.rom_id_for_save(path) == rom_id):
                 return RomMClient.compute_content_hash(
                     self._pack_gci_unit(gamecube_saves.unit_members(path), rom_id))
@@ -14491,6 +14862,7 @@ class AutoSyncManager:
         for entry in (self.retroarch.get_save_files() or {}).get('saves', []):
             path = Path(entry['path'])
             if (path.suffix.lower() == gamecube_saves.GCI_SUFFIX
+                    and gamecube_saves.in_card(path)
                     and gamecube_saves.game_code(path) == code):
                 return path.parent
         if not saves_dir:
@@ -14556,6 +14928,84 @@ class AutoSyncManager:
                 return (g.get('platform_slug')
                         or (g.get('romm_data') or {}).get('platform_slug'))
         return None
+
+    def _state_emulator(self, path, rom_id):
+        """The core for a state in a flat folder, which names no emulator."""
+        game = next((g for g in (self.get_games() or []) if g.get('rom_id') == rom_id), {})
+        try:
+            return self.retroarch.describe_core_resolution(
+                game.get('platform'), system_slug=game.get('platform_slug')
+            ).get('resolved_core')
+        except Exception as e:
+            logging.debug(f"no core for {Path(path).name}: {e}")
+            return None
+
+    def _is_ps2_card_op(self, op):
+        """A server save that is a whole PS2 card, as Argosy's built-in core uploads."""
+        return (str(op.get('file_name') or '').lower().endswith('.ps2')
+                and self._platform_slug_of(op.get('rom_id')) == 'ps2')
+
+    @staticmethod
+    def _ps2_baseline_file(rom_id):
+        return cache_dir() / 'ps2_saves' / str(rom_id) / 'server_card.json'
+
+    def _ps2_reported_hash(self, rom_id, packed):
+        """The hash to tell RomM for this packed card.
+
+        After a whole card is restored the server knows the card's hash, not the
+        zip's. While the card still packs to the zip it restored to, it is that
+        same save, so report the server's hash or it looks like new progress.
+        """
+        own = RomMClient.compute_content_hash(packed)
+        try:
+            baseline = json.loads(self._ps2_baseline_file(rom_id).read_text())
+            if baseline.get('zip') == own:
+                return baseline.get('server') or own
+        except (OSError, ValueError, AttributeError):
+            pass
+        return own
+
+    def _restore_ps2_card(self, op, device_id, session_id):
+        """Put a whole PS2 card from the server in place of the game's card.
+
+        Same rules as _restore_ps2_save: deferred while RetroArch runs, and the
+        previous card is kept as "<card>.backup".
+        """
+        file_name = op.get('file_name') or ''
+        if self.is_retroarch_running():
+            self.log(f"ℹ️ Save-sync: RetroArch is running; {file_name} will "
+                     f"restore once it is closed.")
+            return False
+        card_path = self._ps2_card_path(op, (self.retroarch.save_dirs or {}).get('saves'))
+        if not card_path:
+            self.log(f"⚠️ Save-sync: no memory card location for {file_name}")
+            return False
+        staged = cache_dir() / 'incoming_saves' / file_name
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        if not self.romm_client.download_save_by_id(
+                op.get('save_id'), 'saves', staged,
+                device_id=device_id, session_id=session_id):
+            return False
+        try:
+            ps2_memcard.Card.open(staged)
+            server_hash = RomMClient.compute_content_hash(staged)
+            card_path.parent.mkdir(parents=True, exist_ok=True)
+            if card_path.is_file():
+                shutil.copy2(card_path, str(card_path) + '.backup')
+            shutil.copyfile(staged, card_path)
+        except (ps2_memcard.CardError, OSError) as e:
+            self.log(f"⚠️ Save-sync: could not restore {file_name}: {e}")
+            return False
+        finally:
+            staged.unlink(missing_ok=True)
+        self.log(f"✅ Restored memory card {card_path.name}")
+        self._record_synced(str(card_path))
+        restored = self._pack_ps2_card(card_path, op.get('rom_id'))
+        if restored:
+            self._ps2_baseline_file(op.get('rom_id')).write_text(json.dumps({
+                'zip': RomMClient.compute_content_hash(restored), 'server': server_hash}))
+            self._record_synced(str(restored))
+        return True
 
     def _is_ps2_zip_op(self, op):
         """A server save that is a PS2 game's folders rather than a whole card."""
@@ -14967,43 +15417,60 @@ class AutoSyncManager:
     )
 
     def _sync_switch_keys(self, bios, progress=None):
-        """Fetch a separately uploaded prod.keys. Returns {'installed', ...}.
+        """Fetch independent prod/title keys uploads. Returns {'installed', ...}.
 
         Best-effort by design: a missing or failed key fetch must not abort a
         firmware install that would otherwise succeed. The caller reports the
         combined state, and 'no-keys' is what tells the user the set cannot
         boot -- not an exception from here.
         """
+        installed = 0
+        errors = []
+        changed_files = set()
         try:
-            entry = bios.find_keys_entry('switch')
-            if not entry:
-                return {'installed': 0, 'status': 'no-keys-on-server'}
-            if emulator_saves.keys_are_current(entry):
-                return {'installed': 0, 'status': 'up-to-date'}
-
-            path = bios.download_firmware_entry(
-                entry, cache_dir() / 'firmware' / entry['file_name'],
-                progress=progress)
-            if not path:
-                return {'installed': 0, 'status': 'failed'}
-
-            # Last word on what this file is: the entry looked like keys by
-            # size, now the bytes have to agree. install_keys_file re-checks
-            # per member, but failing here gives the caller a reason.
-            if emulator_saves.identify_upload(path) != 'keys':
-                self.log(f"⚠️ {entry.get('file_name')} is not a key file")
-                return {'installed': 0, 'status': 'not-keys'}
-
-            written = emulator_saves.install_keys_file(path)
-            if written:
-                emulator_saves.write_keys_marker(
-                    entry.get('file_name'), entry.get('md5_hash'))
-                self.forget_title_ids()
-                self.log(f"🔑 Installed {entry.get('file_name')}")
-            return {'installed': written, 'status': 'installed'}
-        except Exception as e:
-            self.log(f"⚠️ Could not sync Switch keys: {e}")
-            return {'installed': 0, 'status': 'failed'}
+            entries = bios.find_keys_entries('switch')
+        except Exception:
+            return {'installed': 0, 'status': 'failed',
+                    'message': 'Could not list Switch keys on RomM; retry the install'}
+        if not entries:
+            return {'installed': 0, 'status': 'no-keys-on-server'}
+        for entry in entries:
+            try:
+                receipt = emulator_saves.read_keys_marker().get('entries', {}).get(
+                    entry.get('file_name'), {})
+                names = receipt.get('files') or [
+                    emulator_saves.key_file_name(entry.get('file_name')) or 'prod.keys']
+                # Reapply a newer selected entry if an older one just changed its files.
+                if (not changed_files.intersection(names)
+                        and emulator_saves.keys_are_current(entry)):
+                    continue
+                path = bios.download_firmware_entry(
+                    entry, cache_dir() / 'firmware' / entry['file_name'],
+                    progress=progress)
+                if not path:
+                    raise ValueError('download failed')
+                if emulator_saves.identify_upload(path) != 'keys':
+                    raise ValueError('upload contains no valid key data')
+                files = []
+                written = emulator_saves.install_keys_file(
+                    path, installed_files=files, preserve_manual=True)
+                if written:
+                    emulator_saves.write_keys_marker(
+                        entry.get('file_name'), entry.get('md5_hash'), files)
+                    installed += written
+                    changed_files.update(files)
+                    self.forget_title_ids()
+                    self.log(f"🔑 Installed {entry.get('file_name')}")
+                elif not emulator_saves.keys_are_current(entry):
+                    raise ValueError('no key files installed')
+            except Exception:
+                # Do not expose downloaded content (or arbitrary exception text).
+                self.log(f"⚠️ Could not install Switch keys: {entry.get('file_name')}")
+                errors.append(f"Could not install {entry.get('file_name')}; "
+                              'check the RomM upload and connection, then retry')
+        return {'installed': installed,
+                'status': 'failed' if errors else ('installed' if installed else 'up-to-date'),
+                'message': '; '.join(errors)}
 
     def ensure_switch_keys(self, progress=None):
         """Install prod.keys from RomM when it is missing or out of date.
@@ -15044,11 +15511,13 @@ class AutoSyncManager:
         # the server, which sync_switch_firmware installs first.
         keys = emulator_saves.keys_status()
         keys_ok = keys is not None
-        if not keys_ok:
-            try:
-                keys_ok = bios.find_keys_entry('switch') is not None
-            except Exception:
-                keys_ok = False
+        try:
+            key_entries = bios.find_keys_entries('switch')
+            keys_ok = keys_ok or any(
+                emulator_saves.key_file_name(e.get('file_name')) != 'title.keys'
+                for e in key_entries)
+        except Exception:
+            pass
         # Version labels, parsed from filenames. The installed one comes from
         # the marker -- the name of the archive we actually unpacked -- so
         # "17.0.1 installed" is a statement about this machine's history, not
@@ -15115,13 +15584,19 @@ class AutoSyncManager:
         # circulate, and firmware that is already correct on disk must not be
         # re-downloaded merely because the keys beside it are missing.
         keys_result = self._sync_switch_keys(bios, progress=progress)
+        key_count = keys_result.get('installed', 0)
+        keys_failed = keys_result.get('status') == 'failed'
 
         entry = bios.find_firmware_entry('switch')
         if not entry:
+            if keys_failed:
+                return {'status': 'failed', 'installed': 0, 'skipped': 0,
+                        'keys': key_count, 'message': keys_result['message']}
             if keys_result.get('installed'):
-                return {'status': 'installed', 'installed': 0, 'skipped': 0,
-                        'keys': 1,
-                        'message': 'Installed prod.keys; no firmware on the server'}
+                return {'status': ('installed' if emulator_saves.find_prod_keys()
+                                   else 'no-firmware'), 'installed': 0, 'skipped': 0,
+                        'keys': key_count,
+                        'message': f'Installed {key_count} Switch key file(s); no firmware on the server'}
             return {'status': 'no-firmware',
                     'message': 'No Switch firmware on the server'}
 
@@ -15133,16 +15608,20 @@ class AutoSyncManager:
             skipped = (emulator_saves.firmware_status() or {}).get('count', 0)
             if emulator_saves.find_prod_keys() is None:
                 return {'status': 'no-keys', 'installed': 0, 'skipped': skipped,
-                        'keys': 0, 'message': self._NO_KEYS_MESSAGE}
-            return {'status': 'up-to-date', 'installed': 0,
+                        'keys': key_count, 'message': self._NO_KEYS_MESSAGE}
+            if keys_failed:
+                return {'status': 'failed', 'installed': 0, 'skipped': skipped,
+                        'keys': key_count, 'message': keys_result['message']}
+            return {'status': 'installed' if key_count else 'up-to-date', 'installed': 0,
                     'skipped': skipped,
                     'keys': keys_result.get('installed', 0),
-                    'message': f"{entry.get('file_name')} is already installed"}
+                    'message': (f'Installed {key_count} Switch key file(s); firmware already installed'
+                                if key_count else f"{entry.get('file_name')} is already installed")}
 
         archive = bios.download_firmware_entry(
             entry, cache_dir() / 'firmware' / entry['file_name'], progress=progress)
         if not archive:
-            return {'status': 'failed',
+            return {'status': 'failed', 'keys': key_count,
                     'message': f"Could not download {entry.get('file_name')}"}
 
         # An archive holding no NCAs is not firmware, whatever it is called.
@@ -15151,21 +15630,24 @@ class AutoSyncManager:
         kind = emulator_saves.identify_upload(archive)
         if kind != 'firmware':
             if kind == 'keys':
-                written = emulator_saves.install_keys_file(archive)
-                emulator_saves.write_keys_marker(
-                    entry.get('file_name'), entry.get('md5_hash'))
-                return {'status': 'installed', 'installed': 0, 'skipped': 0,
-                        'keys': written,
-                        'message': f"{entry.get('file_name')} is a key file, "
-                                   'not firmware; installed it as keys'}
-            return {'status': 'failed',
+                files = []
+                written = emulator_saves.install_keys_file(
+                    archive, installed_files=files, preserve_manual=True)
+                if written:
+                    emulator_saves.write_keys_marker(
+                        entry.get('file_name'), entry.get('md5_hash'), files)
+                return {'status': 'failed' if keys_failed else 'installed',
+                        'installed': 0, 'skipped': 0, 'keys': written + key_count,
+                        'message': keys_result['message'] if keys_failed else
+                                   f"{entry.get('file_name')} is a key file, not firmware; installed it as keys"}
+            return {'status': 'failed', 'keys': key_count,
                     'message': f"{entry.get('file_name')} contains no firmware"}
 
         try:
             result = emulator_saves.install_firmware_zip(archive)
         except Exception as e:
             self.log(f"❌ Firmware install failed: {e}")
-            return {'status': 'failed', 'message': str(e)}
+            return {'status': 'failed', 'keys': key_count, 'message': str(e)}
 
         # Record the set that is now on disk either way: 'installed nothing'
         # still means this archive's contents are present, and without the
@@ -15173,6 +15655,7 @@ class AutoSyncManager:
         status = emulator_saves.firmware_status() or {}
         emulator_saves.write_firmware_marker(
             entry.get('file_name'), entry.get('md5_hash'), status.get('count', 0))
+        result['keys'] += key_count
 
         # Keys are not optional bookkeeping: every NCA here is encrypted, so an
         # install without prod.keys boots nothing. Report that rather than
@@ -15187,10 +15670,15 @@ class AutoSyncManager:
             self.forget_title_ids()
             self.log(f"🔑 Installed {result['keys']} key file(s)")
 
+        if keys_failed:
+            return {'status': 'failed', **result, 'message': keys_result['message']}
+
         if not result['installed']:
-            return {'status': 'up-to-date', 'installed': 0,
+            return {'status': 'installed' if result['keys'] else 'up-to-date', 'installed': 0,
                     'skipped': result['skipped'],
-                    'message': 'Firmware already installed'}
+                    'keys': result['keys'],
+                    'message': (f"Installed {result['keys']} Switch key file(s); firmware already installed"
+                                if result['keys'] else 'Firmware already installed')}
 
         self.log(f"✅ Installed {result['installed']} firmware files "
                  f"({result['skipped']} already present)")
@@ -16154,6 +16642,13 @@ class AutoSyncManager:
                             except Exception:
                                 pass
                         target = self._resolve_download_target(op, saves_dir)
+                        if target is None and self._is_ps2_card_op(op):
+                            if self._restore_ps2_card(op, device_id, session_id):
+                                summary['downloaded'] += 1
+                                _bump(rom_id, 'down')
+                            else:
+                                summary['deferred'] = summary.get('deferred', 0) + 1
+                            continue
                         if target is None or target is DEFER_DOWNLOAD:
                             # Nowhere RetroArch reads to put it yet; the
                             # conflict stands until the game is launched.
@@ -16321,6 +16816,8 @@ class AutoSyncManager:
         """
         if self._is_ps2_zip_op(op):
             return self._restore_ps2_save(op, device_id, session_id)
+        if self._is_ps2_card_op(op):
+            return self._restore_ps2_card(op, device_id, session_id)
         if self._is_gci_op(op):
             return self._restore_gci_save(op, device_id, session_id)
         if self._is_folder_op(op):
@@ -16464,7 +16961,8 @@ class AutoSyncManager:
             return None
         # A PS2 save zip is folders to merge into a card, not a file to drop;
         # a GameCube save is files for a card folder only its restore finds.
-        if self._is_ps2_zip_op(op) or self._is_gci_op(op) or self._is_folder_op(op):
+        if (self._is_ps2_zip_op(op) or self._is_ps2_card_op(op)
+                or self._is_gci_op(op) or self._is_folder_op(op)):
             return None
         # The op's emulator is the SERVER save's label, which a buggy or
         # foreign upload can set to anything ('switch' instead of 'eden'). The
@@ -17753,7 +18251,7 @@ class AutoSyncManager:
                     # the game's card instead, unless this device already
                     # holds that version.
                     if (_platform_slug == 'ps2'
-                            and original_filename.lower().endswith('.zip')):
+                            and original_filename.lower().endswith(('.zip', '.ps2'))):
                         device_id = self.settings.get('Device', 'device_id', '') or None
                         current = any(
                             sync.get('device_id') == device_id and sync.get('is_current')
@@ -17770,13 +18268,16 @@ class AutoSyncManager:
                             packed = (self._pack_ps2_card(card, rom_id)
                                       if card and card.is_file() else None)
                             current = bool(packed) and (
-                                RomMClient.compute_content_hash(packed)
+                                self._ps2_reported_hash(rom_id, packed)
                                 == latest_save.get('content_hash'))
                         if current:
                             skipped_count += 1
                         else:
                             downloads_attempted += 1
-                            if self._restore_ps2_save(
+                            restore = (self._restore_ps2_card
+                                       if original_filename.lower().endswith('.ps2')
+                                       else self._restore_ps2_save)
+                            if restore(
                                     {'rom_id': rom_id, 'file_name': original_filename,
                                      'save_id': latest_save.get('id'),
                                      'emulator': romm_emulator},
@@ -19372,8 +19873,11 @@ class BiosTrackingManager:
                         self.platform_status[platform_slug]['missing'] = len(required_missing_after)
                         self.platform_status[platform_slug]['total_required'] = len(present_after) + len(required_missing_after)
             else:
-                error_msg = "unavailable_on_server"
-                self.log(f"⚠️ BIOS unavailable on server for {platform_name}")
+                # False also covers a local failure, with the files on the server.
+                local = not bios_manager.ensure_system_directory()
+                error_msg = "no_bios_folder" if local else "unavailable_on_server"
+                self.log(f"⚠️ No BIOS folder for {platform_name}" if local
+                         else f"⚠️ BIOS unavailable on server for {platform_name}")
                 with self._lock:
                     self.download_failures[platform_slug] = error_msg
 
@@ -19808,7 +20312,7 @@ class SteamShortcutManager:
             return None
         return userdata / 'shortcuts.vdf'
 
-    def _build_launch_command(self, rom_path, platform_name):
+    def _build_launch_command(self, rom_path, platform_name, platform_slug=None):
         """Build the exe and launch options for a ROM.
 
         Returns (exe, launch_options) tuple, or (None, None) if no core found.
@@ -19838,7 +20342,8 @@ class SteamShortcutManager:
             return None, None
 
         # Find the right core
-        core_name, core_path = self.retroarch.suggest_core_for_platform(platform_name)
+        core_name, core_path = self.retroarch.suggest_core_for_platform(
+            platform_name, platform_slug, platform_slug=platform_slug)
         if not core_name:
             return None, None
 
@@ -19865,7 +20370,7 @@ class SteamShortcutManager:
             platform_slug: Optional platform slug for cover art organization
             cover_url: Optional cover URL from RomM API (path_cover_l or path_cover_s)
         """
-        exe, launch_options = self._build_launch_command(rom_path, platform_name)
+        exe, launch_options = self._build_launch_command(rom_path, platform_name, platform_slug)
 
         # If no core found, create placeholder shortcut
         if not exe:
