@@ -99,6 +99,8 @@ export function SwitchProfileRow({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+// Hover moves focus, it doesn't light a card by itself: with both, the focused
+// card and the hovered one were lit at once. One highlight, one A target.
 function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
   { profile: Profile; onPick: () => void; onManage: () => void; cardRef?: Ref<HTMLDivElement>;
     index: number; chosen: boolean }) {
@@ -108,7 +110,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       className={`pf-card${chosen ? ' pf-chosen' : ''}`}
       onSecondaryButton={onManage} onSecondaryActionDescription="Manage"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
-      onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
+      onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
       style={{
         width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
@@ -149,7 +151,7 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
   return (
     <Focusable noFocusRing onActivate={onAdd} onClick={onAdd} className="pf-card"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
-      onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
+      onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
       style={{
         width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
