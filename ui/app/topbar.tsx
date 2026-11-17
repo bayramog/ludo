@@ -477,10 +477,10 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
   // made some GPUs drop the blur for a couple of frames (a sharp flash).
   const [picker, setPicker] = useState(false);
   const [fading, setFading] = useState(false);
-  // The menu panel stays mounted for a moment and fades out over the picker's
-  // entrance, so there is no empty blurred frame between the two.
-  const [panelGone, setPanelGone] = useState(false);
-  useEffect(() => { if (!picker) return; const t = setTimeout(() => setPanelGone(true), 200); return () => clearTimeout(t); }, [picker]);
+  // The menu panel fades out over the picker's entrance and then stays
+  // mounted, invisible and inert: removing its blurred layer from on top of
+  // the scrim's blur drops the blur for a frame or two on some GPUs.
+  useEffect(() => { if (picker) panelRef.current?.setAttribute('inert', ''); }, [picker]);
   const doQuit = () => {
     if (!quitArmed) { setQuitArmed(true); return; }
     setQuitArmed(false);
@@ -512,7 +512,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
         {picker && <ProfilePickerModal embedded closeModal={closeModal} onLeaving={() => setFading(true)} />}
         {/* Click-away scrim */}
         {!picker && <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />}
-        {!panelGone && <Focusable noFocusRing autoFocus={!picker} ref={panelRef} flow-children="vertical" style={{
+        <Focusable noFocusRing autoFocus={!picker} ref={panelRef} flow-children="vertical" style={{
           position: 'relative', width: '260px', maxWidth: '90vw', boxSizing: 'border-box',
           fontFamily: V2.font, color: V2.fg, padding: '8px',
           display: 'flex', flexDirection: 'column',
@@ -560,7 +560,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
                 label={quitArmed ? 'Confirm quit' : 'Quit'} danger armed={quitArmed} onSelect={doQuit} />
             </>
           )}
-        </Focusable>}
+        </Focusable>
       </Focusable>
     </ModalRoot>
   );
