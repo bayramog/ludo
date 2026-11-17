@@ -472,6 +472,11 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
   // CollectionActionsModal's "Remove downloaded"), disarming after 4s.
   const [quitArmed, setQuitArmed] = useState(false);
   useEffect(() => { if (!quitArmed) return; const t = setTimeout(() => setQuitArmed(false), 4000); return () => clearTimeout(t); }, [quitArmed]);
+  // "Switch profile" turns this modal into the picker instead of opening a
+  // second one: stacking two blurred scrims and then removing the lower one
+  // made some GPUs drop the blur for a couple of frames (a sharp flash).
+  const [picker, setPicker] = useState(false);
+  const [fading, setFading] = useState(false);
   const doQuit = () => {
     if (!quitArmed) { setQuitArmed(true); return; }
     setQuitArmed(false);
@@ -490,6 +495,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'rgba(7,7,15,0.45)',
           WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)',
+          opacity: fading ? 0 : 1, transition: 'opacity .16s ease-in',
         }}>
         <style>{`
           ${V2_FOCUS_STYLE}
@@ -498,9 +504,10 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           }
           @keyframes umIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
         `}</style>
+        {picker && <ProfilePickerModal embedded closeModal={closeModal} onLeaving={() => setFading(true)} />}
         {/* Click-away scrim */}
-        <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />
-        <Focusable noFocusRing autoFocus ref={panelRef} flow-children="vertical" style={{
+        {!picker && <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />}
+        {!picker && <Focusable noFocusRing autoFocus ref={panelRef} flow-children="vertical" style={{
           position: 'relative', width: '260px', maxWidth: '90vw', boxSizing: 'border-box',
           fontFamily: V2.font, color: V2.fg, padding: '8px',
           display: 'flex', flexDirection: 'column',
@@ -526,12 +533,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
             </div>
           </div>
           <div style={{ height: '1px', background: V2.border, margin: '0 4px 4px' }} />
-          <SwitchProfileRow onOpen={() => {
-            // Picker first, menu closed once it has painted: closing first left
-            // a frame or two with no blurred scrim, so the library flashed sharp.
-            showModal(<ProfilePickerModal />);
-            requestAnimationFrame(() => requestAnimationFrame(() => closeModal?.()));
-          }} />
+          <SwitchProfileRow onOpen={() => setPicker(true)} />
           <UserMenuRow icon={<FaDownload size={15} />}
             label={`Downloads${dlGlimpse.count > 0 ? ` (${dlGlimpse.count})` : ''}`}
             onSelect={() => go("/romm-sync-downloads")} />
@@ -552,7 +554,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
                 label={quitArmed ? 'Confirm quit' : 'Quit'} danger armed={quitArmed} onSelect={doQuit} />
             </>
           )}
-        </Focusable>
+        </Focusable>}
       </Focusable>
     </ModalRoot>
   );
