@@ -526,7 +526,12 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
             </div>
           </div>
           <div style={{ height: '1px', background: V2.border, margin: '0 4px 4px' }} />
-          <SwitchProfileRow onOpen={() => { closeModal?.(); showModal(<ProfilePickerModal />); }} />
+          <SwitchProfileRow onOpen={() => {
+            // Picker first, menu closed once it has painted: closing first left
+            // a frame or two with no blurred scrim, so the library flashed sharp.
+            showModal(<ProfilePickerModal />);
+            requestAnimationFrame(() => requestAnimationFrame(() => closeModal?.()));
+          }} />
           <UserMenuRow icon={<FaDownload size={15} />}
             label={`Downloads${dlGlimpse.count > 0 ? ` (${dlGlimpse.count})` : ''}`}
             onSelect={() => go("/romm-sync-downloads")} />
