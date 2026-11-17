@@ -195,7 +195,10 @@ const REDUCED_MOTION = () => !!window.matchMedia?.('(prefers-reduced-motion: red
 // "Who's playing?": every profile as a card. A to open, the Details button to
 // manage one. Shown from the account menu, and by itself at launch when a
 // Steam account with no profile yet opens the app on a machine with several.
-export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) {
+// embedded: rendered inside the account menu's own modal, on its blurred scrim,
+// in place of the menu panel. onLeaving lets that host fade its scrim with us.
+export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
+  { closeModal?: () => void; embedded?: boolean; onLeaving?: () => void }) {
   const [list, setList] = useState<ProfileList | null>(null);
   const [busy, setBusy] = useState(false);
   // Animated exit: fade the picker out, then unmount it. The chosen card
@@ -205,6 +208,7 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
   const close = () => {
     if (leaving) return;
     setLeaving(true);
+    onLeaving?.();
     setTimeout(() => closeModal?.(), REDUCED_MOTION() ? 0 : 160);
   };
   const rowRef = useRef<HTMLDivElement>(null);
@@ -255,17 +259,20 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
   const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} onChanged={load} onPick={() => pick(p)} />);
 
   const profiles = list?.profiles ?? [];
-  return (
-    <ModalRoot bHideCloseIcon onCancel={close} onEscKeypress={close}
-      className="romm-modal-collapse" modalClassName="romm-modal-collapse">
-      <Focusable noFocusRing className={`romm-ui pf-scrim${leaving ? ' pf-leaving' : ''}`}
+  const body = (
+    <Focusable noFocusRing className={`romm-ui pf-scrim${leaving ? ' pf-leaving' : ''}`}
         onCancelButton={close}
         onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) close(); }}
         style={{
           position: 'fixed', inset: MODAL_SCRIM_INSET, zIndex: 9999,
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '28px',
-          background: 'rgba(7,7,15,0.55)',
-          WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)',
+          // Embedded: the account menu's scrim already blurs the page; a second
+          // blur here would re-raster when the menu's went away, and some GPUs
+          // skip the blur for a couple of frames then (sharp library flash).
+          ...(embedded ? { background: 'rgba(7,7,15,0.12)' } : {
+            background: 'rgba(7,7,15,0.55)',
+            WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)',
+          }),
           fontFamily: V2.font, color: V2.fg,
         }}>
         <style>{`
@@ -296,7 +303,10 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
           </div>
         )}
       </Focusable>
-    </ModalRoot>
+    );
+  return embedded ? body : (
+    <ModalRoot bHideCloseIcon onCancel={close} onEscKeypress={close}
+      className="romm-modal-collapse" modalClassName="romm-modal-collapse">{body}</ModalRoot>
   );
 }
 
