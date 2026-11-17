@@ -177,9 +177,10 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
 // rise in left to right, the pick pulses, the exit fades. The blurred scrim
 // itself appears at once: fading it in flashed the sharp library for a few
 // frames right after the account menu (also blurred) closed.
-// Card entries use fill-mode backwards so the focus scale still applies after.
+// The rise uses translate/scale, not transform, so it composes with the
+// focused card's transform scale instead of snapping to it at the end.
 const PICKER_MOTION = `
-  @keyframes pfRise { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+  @keyframes pfRise { from { opacity: 0; translate: 0 6px; scale: 0.985; } to { opacity: 1; translate: none; scale: none; } }
   @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
   .pf-scrim { transition: opacity .16s ease-in; }
   @keyframes pfFade { from { opacity: 0; } }
