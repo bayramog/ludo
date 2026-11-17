@@ -5,7 +5,7 @@
 //
 // Desktop only: on the Deck there is one profile, get_profiles answers
 // {supported: false} and none of this renders.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { Focusable, GamepadButton, ModalRoot, host, showModal } from "@ludo/host";
 import { FaCheck, FaLink, FaPen, FaPlus, FaTrash, FaUsers } from "react-icons/fa";
 import { V2 } from "./theme";
@@ -99,10 +99,11 @@ export function SwitchProfileRow({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function ProfileCard({ profile, onPick, onManage }: { profile: Profile; onPick: () => void; onManage: () => void }) {
+function ProfileCard({ profile, onPick, onManage, cardRef }:
+  { profile: Profile; onPick: () => void; onManage: () => void; cardRef?: Ref<HTMLDivElement> }) {
   const [hot, setHot] = useState(false);
   return (
-    <Focusable noFocusRing onActivate={onPick} onClick={onPick}
+    <Focusable noFocusRing ref={cardRef} onActivate={onPick} onClick={onPick}
       onSecondaryButton={onManage} onSecondaryActionDescription="Manage"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
@@ -110,7 +111,10 @@ function ProfileCard({ profile, onPick, onManage }: { profile: Profile; onPick: 
         width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
         cursor: 'pointer',
-        background: hot ? 'rgba(255,255,255,0.12)' : 'linear-gradient(180deg,rgba(20,20,30,0.72),rgba(10,10,18,0.8))',
+        // Stays dark when focused: a see-through light fill turned grey over the
+        // bright covers blurred behind the picker. Focus is the border and lift.
+        background: hot ? 'linear-gradient(180deg,rgba(34,34,48,0.92),rgba(18,18,28,0.95))'
+          : 'linear-gradient(180deg,rgba(20,20,30,0.72),rgba(10,10,18,0.8))',
         border: `1px solid ${hot ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.12)'}`,
         transform: hot ? 'scale(1.04)' : 'none',
         boxShadow: hot ? '0 12px 32px rgba(0,0,0,.5)' : 'none',
@@ -148,7 +152,7 @@ function AddProfileCard({ onAdd }: { onAdd: () => void }) {
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
         cursor: 'pointer',
         border: `1.5px dashed ${hot ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.22)'}`,
-        background: hot ? 'rgba(255,255,255,0.12)' : 'transparent',
+        background: hot ? 'rgba(24,24,34,0.85)' : 'transparent',
         transform: hot ? 'scale(1.04)' : 'none',
         transition: 'transform .14s ease, background .14s ease, border-color .14s ease',
       }}>
@@ -170,11 +174,19 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
   const [list, setList] = useState<ProfileList | null>(null);
   const [busy, setBusy] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
+  const currentRef = useRef<HTMLDivElement>(null);
   const load = () => getProfiles().then(setList).catch(() => setList({ supported: false }));
   useEffect(() => { load(); }, []);
   useEffect(() => {
     if (!list?.profiles) return;
-    const t = setTimeout(() => { if (rowRef.current) _forceGamepadFocus(rowRef.current); }, 60);
+    // Onto the profile in use, not the row: focusing the row lit no card, so
+    // a picker opened with the mouse showed no Select/Manage hints.
+    const t = setTimeout(() => {
+      const target = currentRef.current
+        || rowRef.current?.querySelector<HTMLElement>('[tabindex]')
+        || rowRef.current;
+      if (target) _forceGamepadFocus(target);
+    }, 60);
     return () => clearTimeout(t);
   }, [!!list?.profiles]);
 
@@ -232,7 +244,8 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
         <Focusable noFocusRing autoFocus ref={rowRef} flow-children="horizontal"
           style={{ position: 'relative', display: 'flex', gap: '18px', alignItems: 'stretch', flexWrap: 'wrap',
             justifyContent: 'center', maxWidth: '90vw', opacity: busy ? 0.6 : 1 }}>
-          {profiles.map((p) => <ProfileCard key={p.id} profile={p} onPick={() => pick(p)} onManage={() => manage(p)} />)}
+          {profiles.map((p) => <ProfileCard key={p.id} profile={p} cardRef={p.current ? currentRef : undefined}
+            onPick={() => pick(p)} onManage={() => manage(p)} />)}
           {list?.supported && <AddProfileCard onAdd={add} />}
         </Focusable>
         {list?.steam && (
