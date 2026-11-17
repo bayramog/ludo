@@ -182,12 +182,14 @@ const PICKER_MOTION = `
   @keyframes pfRise { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
   @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
   .pf-scrim { transition: opacity .16s ease-in; }
+  @keyframes pfFade { from { opacity: 0; } }
+  .pf-embedded { animation: pfFade .18s .1s ease-out backwards; }
   .pf-scrim.pf-leaving { opacity: 0; pointer-events: none; }
   .pf-rise { animation: pfRise .26s cubic-bezier(.2,.8,.2,1) backwards; }
   .pf-card { animation: pfRise .3s cubic-bezier(.2,.8,.2,1) backwards; }
   .pf-card.pf-chosen { animation: pfPulse .22s ease-out; }
   @media (prefers-reduced-motion: reduce) {
-    .pf-scrim, .pf-rise, .pf-card, .pf-card.pf-chosen { animation: none !important; transition: none !important; }
+    .pf-scrim, .pf-embedded, .pf-rise, .pf-card, .pf-card.pf-chosen { animation: none !important; transition: none !important; }
   }
 `;
 const REDUCED_MOTION = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -260,7 +262,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
 
   const profiles = list?.profiles ?? [];
   const body = (
-    <Focusable noFocusRing className={`romm-ui pf-scrim${leaving ? ' pf-leaving' : ''}`}
+    <Focusable noFocusRing className={`romm-ui pf-scrim${embedded ? ' pf-embedded' : ''}${leaving ? ' pf-leaving' : ''}`}
         onCancelButton={close}
         onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) close(); }}
         style={{

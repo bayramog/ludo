@@ -477,6 +477,10 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
   // made some GPUs drop the blur for a couple of frames (a sharp flash).
   const [picker, setPicker] = useState(false);
   const [fading, setFading] = useState(false);
+  // The menu panel stays mounted for a moment and fades out over the picker's
+  // entrance, so there is no empty blurred frame between the two.
+  const [panelGone, setPanelGone] = useState(false);
+  useEffect(() => { if (!picker) return; const t = setTimeout(() => setPanelGone(true), 200); return () => clearTimeout(t); }, [picker]);
   const doQuit = () => {
     if (!quitArmed) { setQuitArmed(true); return; }
     setQuitArmed(false);
@@ -502,12 +506,13 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           .romm-modal-collapse, .romm-modal-collapse > div {
             background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important;
           }
+          @keyframes umOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97); } }
           @keyframes umIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
         `}</style>
         {picker && <ProfilePickerModal embedded closeModal={closeModal} onLeaving={() => setFading(true)} />}
         {/* Click-away scrim */}
         {!picker && <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />}
-        {!picker && <Focusable noFocusRing autoFocus ref={panelRef} flow-children="vertical" style={{
+        {!panelGone && <Focusable noFocusRing autoFocus={!picker} ref={panelRef} flow-children="vertical" style={{
           position: 'relative', width: '260px', maxWidth: '90vw', boxSizing: 'border-box',
           fontFamily: V2.font, color: V2.fg, padding: '8px',
           display: 'flex', flexDirection: 'column',
@@ -516,7 +521,8 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           border: `1px solid rgba(255,255,255,0.12)`, borderRadius: V2.radiusCard,
           boxShadow: '0 16px 48px rgba(0,0,0,0.55)',
           maxHeight: '82vh', overflowY: 'auto',
-          animation: 'umIn 0.18s cubic-bezier(0.22,1,0.36,1)',
+          animation: picker ? 'umOut 0.12s ease-in forwards' : 'umIn 0.18s cubic-bezier(0.22,1,0.36,1)',
+          ...(picker ? { position: 'absolute', pointerEvents: 'none' } : {}),
         }}>
           {/* Identity header card — RomM UserMenu __header. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 8px 12px', minWidth: 0 }}>
