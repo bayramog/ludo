@@ -1434,7 +1434,7 @@ def find_standalone_builds(key, spec, settings=None):
                 stem = low[:-len('.appimage')]
                 if not any(stem.startswith(n) for n in names):
                     continue
-                if entry.is_file() and os.access(entry, os.X_OK):
+                if entry.is_file() and _ensure_executable(entry):
                     add(str(entry), _standalone_build_label(spec, stem),
                         'appimage')
         except Exception:
@@ -1456,6 +1456,25 @@ def find_standalone_builds(key, spec, settings=None):
     return builds
 
 
+def _ensure_executable(path):
+    """True when `path` can be run, adding the exec bit if it's missing.
+
+    A downloaded AppImage arrives without +x, and a check on X_OK alone made
+    it invisible, as though it wasn't there. Setting the bit is what the user
+    would have to do by hand anyway, so do it for them when we own the file.
+    """
+    try:
+        if os.access(path, os.X_OK):
+            return True
+        mode = os.stat(path).st_mode
+        os.chmod(path, mode | ((mode & 0o444) >> 2))
+        logging.info(f"Made {path} executable (it was missing +x)")
+        return os.access(path, os.X_OK)
+    except OSError as e:
+        logging.warning(f"{path} is not executable and chmod failed: {e}")
+        return False
+
+
 def find_standalone_executable(key, spec, settings=None):
     """Locate the emulator for `key`, or '' when it isn't installed.
 
@@ -1475,7 +1494,10 @@ def find_standalone_executable(key, spec, settings=None):
                 if flatpak_app_installed(custom.split(':', 1)[1]):
                     return custom
             elif Path(custom).expanduser().exists():
-                return str(Path(custom).expanduser())
+                path = Path(custom).expanduser()
+                if path.is_file():
+                    _ensure_executable(path)
+                return str(path)
             # Fall through rather than refuse. An AppImage renamed by its
             # updater, or a flatpak since removed, would otherwise turn every
             # launch into a hard failure over a preference; auto-detection is
@@ -1504,7 +1526,7 @@ def find_standalone_executable(key, spec, settings=None):
                 # Startswith, not contains: an AppImage merely mentioning the
                 # emulator (a launcher, a sibling tool) is not the emulator.
                 if any(stem.startswith(n) for n in names):
-                    if entry.is_file() and os.access(entry, os.X_OK):
+                    if entry.is_file() and _ensure_executable(entry):
                         return str(entry)
         except Exception:
             continue
@@ -8774,7 +8796,9 @@ class RetroArchInterface:
         for location in appimage_locations:
             if location.exists():
                 for appimage in location.glob('*.AppImage'):
-                    if appimage.is_file() and os.access(appimage, os.X_OK):
+                    if (appimage.is_file()
+                            and appimage.name.lower().startswith('retroarch')
+                            and _ensure_executable(appimage)):
                         # The name must START with RetroArch, which its official
                         # AppImages do (RetroArch-Linux-x86_64.AppImage). A
                         # contains-match picked up RomM-RetroArch-Sync-*.AppImage
