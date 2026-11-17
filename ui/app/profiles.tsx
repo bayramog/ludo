@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type Ref } from "react";
 import { Focusable, GamepadButton, ModalRoot, host, showModal } from "@ludo/host";
 import { FaCheck, FaLink, FaPen, FaPlus, FaTrash, FaUsers } from "react-icons/fa";
 import { V2 } from "./theme";
-import { V2_FOCUS_STYLE } from "./focus";
+import { V2Focus, V2_FOCUS_STYLE } from "./focus";
 import { MODAL_SCRIM_INSET, UserMenuRow, V2TextField, useArmedPress } from "./kit";
 import { _forceGamepadFocus } from "./shell";
 import { toaster } from "./toast";
@@ -119,10 +119,13 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
         // bright covers blurred behind the picker. Focus is the border and lift.
         background: hot ? 'linear-gradient(180deg,rgba(34,34,48,0.92),rgba(18,18,28,0.95))'
           : 'linear-gradient(180deg,rgba(20,20,30,0.72),rgba(10,10,18,0.8))',
-        border: `1px solid ${hot ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.12)'}`,
-        transform: hot ? 'scale(1.04)' : 'none',
-        boxShadow: hot ? '0 12px 32px rgba(0,0,0,.5)' : 'none',
-        transition: 'transform .14s ease, background .14s ease, border-color .14s ease',
+        // Focus is the app's tile treatment (brand ring + glow + scale), the
+        // same as covers and platform tiles.
+        // Border longhands, not the shorthand: with the shorthand plus the focus
+        // borderColor, React dropped the colour on blur and it went white.
+        borderWidth: '1px', borderStyle: 'solid', borderColor: V2.border, transform: 'none', boxShadow: 'none',
+        ...V2Focus.tile(hot),
+        transition: 'transform .15s cubic-bezier(0.22,1,0.36,1), background .15s ease, border-color .15s ease, box-shadow .15s ease',
         animationDelay: `${60 + index * 45}ms`,
       }}>
       <div style={{ position: 'relative' }}>
@@ -159,10 +162,12 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
         width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
         cursor: 'pointer',
-        border: `1.5px dashed ${hot ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.22)'}`,
+        // Dashed at rest, solid brand when focused so no dashes show under the ring.
+        borderWidth: '1.5px', borderStyle: hot ? 'solid' : 'dashed', borderColor: hot ? V2.brand : 'rgba(255,255,255,0.22)',
         background: hot ? 'rgba(24,24,34,0.85)' : 'transparent',
-        transform: hot ? 'scale(1.04)' : 'none',
-        transition: 'transform .14s ease, background .14s ease, border-color .14s ease',
+        transform: 'none', boxShadow: 'none',
+        ...V2Focus.tile(hot),
+        transition: 'transform .15s cubic-bezier(0.22,1,0.36,1), background .15s ease, border-color .15s ease, box-shadow .15s ease',
         animationDelay: `${60 + index * 45}ms`,
       }}>
       <div style={{ width: '84px', height: '84px', borderRadius: '50%', display: 'flex', alignItems: 'center',
@@ -184,7 +189,7 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
 // focused card's transform scale instead of snapping to it at the end.
 const PICKER_MOTION = `
   @keyframes pfRise { from { opacity: 0; translate: 0 6px; scale: 0.985; } to { opacity: 1; translate: none; scale: none; } }
-  @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
+  @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(139,116,232,.35), 0 0 28px rgba(139,116,232,.6), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
   .pf-scrim { transition: opacity .16s ease-in; }
   @keyframes pfFade { from { opacity: 0; } }
   .pf-embedded { animation: pfFade .18s .1s ease-out backwards; }
