@@ -130,7 +130,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
         {profile.current && (
           <div style={{
             position: 'absolute', right: '-2px', bottom: '-2px', width: '24px', height: '24px', borderRadius: '50%',
-            background: '#22c55e', border: '3px solid #12121b', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#22c55e', border: `3px solid ${hot ? '#20202d' : '#12121b'}`, transition: 'border-color .14s ease', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}><FaCheck size={10} color="#fff" /></div>
         )}
       </div>
