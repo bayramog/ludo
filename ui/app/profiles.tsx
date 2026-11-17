@@ -99,11 +99,13 @@ export function SwitchProfileRow({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function ProfileCard({ profile, onPick, onManage, cardRef }:
-  { profile: Profile; onPick: () => void; onManage: () => void; cardRef?: Ref<HTMLDivElement> }) {
+function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
+  { profile: Profile; onPick: () => void; onManage: () => void; cardRef?: Ref<HTMLDivElement>;
+    index: number; chosen: boolean }) {
   const [hot, setHot] = useState(false);
   return (
     <Focusable noFocusRing ref={cardRef} onActivate={onPick} onClick={onPick}
+      className={`pf-card${chosen ? ' pf-chosen' : ''}`}
       onSecondaryButton={onManage} onSecondaryActionDescription="Manage"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
@@ -119,6 +121,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef }:
         transform: hot ? 'scale(1.04)' : 'none',
         boxShadow: hot ? '0 12px 32px rgba(0,0,0,.5)' : 'none',
         transition: 'transform .14s ease, background .14s ease, border-color .14s ease',
+        animationDelay: `${60 + index * 45}ms`,
       }}>
       <div style={{ position: 'relative' }}>
         <ProfileAvatar profile={profile} size={84} />
@@ -141,10 +144,10 @@ function ProfileCard({ profile, onPick, onManage, cardRef }:
   );
 }
 
-function AddProfileCard({ onAdd }: { onAdd: () => void }) {
+function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) {
   const [hot, setHot] = useState(false);
   return (
-    <Focusable noFocusRing onActivate={onAdd} onClick={onAdd}
+    <Focusable noFocusRing onActivate={onAdd} onClick={onAdd} className="pf-card"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
       style={{
@@ -155,6 +158,7 @@ function AddProfileCard({ onAdd }: { onAdd: () => void }) {
         background: hot ? 'rgba(24,24,34,0.85)' : 'transparent',
         transform: hot ? 'scale(1.04)' : 'none',
         transition: 'transform .14s ease, background .14s ease, border-color .14s ease',
+        animationDelay: `${60 + index * 45}ms`,
       }}>
       <div style={{ width: '84px', height: '84px', borderRadius: '50%', display: 'flex', alignItems: 'center',
         justifyContent: 'center', background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.7)' }}>
@@ -167,12 +171,40 @@ function AddProfileCard({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+// Picker motion, in the app's overlay idiom (rdIn/umIn): the title and cards
+// rise in left to right, the pick pulses, the exit fades. The blurred scrim
+// itself appears at once: fading it in flashed the sharp library for a few
+// frames right after the account menu (also blurred) closed.
+// Card entries use fill-mode backwards so the focus scale still applies after.
+const PICKER_MOTION = `
+  @keyframes pfRise { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+  @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
+  .pf-scrim { transition: opacity .16s ease-in; }
+  .pf-scrim.pf-leaving { opacity: 0; pointer-events: none; }
+  .pf-rise { animation: pfRise .26s cubic-bezier(.2,.8,.2,1) backwards; }
+  .pf-card { animation: pfRise .3s cubic-bezier(.2,.8,.2,1) backwards; }
+  .pf-card.pf-chosen { animation: pfPulse .22s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .pf-scrim, .pf-rise, .pf-card, .pf-card.pf-chosen { animation: none !important; transition: none !important; }
+  }
+`;
+const REDUCED_MOTION = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
 // "Who's playing?": every profile as a card. A to open, the Details button to
 // manage one. Shown from the account menu, and by itself at launch when a
 // Steam account with no profile yet opens the app on a machine with several.
 export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) {
   const [list, setList] = useState<ProfileList | null>(null);
   const [busy, setBusy] = useState(false);
+  // Animated exit: fade the picker out, then unmount it. The chosen card
+  // pulses first so a switch reads as a step, not a glitch.
+  const [leaving, setLeaving] = useState(false);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const close = () => {
+    if (leaving) return;
+    setLeaving(true);
+    setTimeout(() => closeModal?.(), REDUCED_MOTION() ? 0 : 160);
+  };
   const rowRef = useRef<HTMLDivElement>(null);
   const currentRef = useRef<HTMLDivElement>(null);
   const load = () => getProfiles().then(setList).catch(() => setList({ supported: false }));
@@ -193,9 +225,15 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
   const pick = async (p: Profile) => {
     if (busy) return;
     setBusy(true);
+    setChosen(p.id);
     try {
+      if (!REDUCED_MOTION()) await new Promise((res) => setTimeout(res, 220));
+      setLeaving(true);
       const reloading = await openProfile(p.id);
       if (!reloading) closeModal?.();
+    } catch (e) {
+      setLeaving(false); setChosen(null);
+      throw e;
     } finally { setBusy(false); }
   };
   const add = async () => {
@@ -216,11 +254,11 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
 
   const profiles = list?.profiles ?? [];
   return (
-    <ModalRoot bHideCloseIcon onCancel={closeModal} onEscKeypress={closeModal}
+    <ModalRoot bHideCloseIcon onCancel={close} onEscKeypress={close}
       className="romm-modal-collapse" modalClassName="romm-modal-collapse">
-      <Focusable noFocusRing className="romm-ui"
-        onCancelButton={() => closeModal?.()}
-        onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) closeModal?.(); }}
+      <Focusable noFocusRing className={`romm-ui pf-scrim${leaving ? ' pf-leaving' : ''}`}
+        onCancelButton={close}
+        onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) close(); }}
         style={{
           position: 'fixed', inset: MODAL_SCRIM_INSET, zIndex: 9999,
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '28px',
@@ -230,12 +268,13 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
         }}>
         <style>{`
           ${V2_FOCUS_STYLE}
+          ${PICKER_MOTION}
           .romm-modal-collapse, .romm-modal-collapse > div {
             background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important;
           }
         `}</style>
-        <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />
-        <div style={{ position: 'relative', textAlign: 'center' }}>
+        <div onClick={close} style={{ position: 'absolute', inset: 0 }} />
+        <div className="pf-rise" style={{ position: 'relative', textAlign: 'center' }}>
           <div style={{ fontSize: '26px', fontWeight: 800 }}>Who's playing?</div>
           <div style={{ fontSize: '13px', color: V2.fgMuted, marginTop: '8px' }}>
             Each profile has its own RomM account, saves and play history. Games stay shared.
@@ -243,13 +282,14 @@ export function ProfilePickerModal({ closeModal }: { closeModal?: () => void }) 
         </div>
         <Focusable noFocusRing autoFocus ref={rowRef} flow-children="horizontal"
           style={{ position: 'relative', display: 'flex', gap: '18px', alignItems: 'stretch', flexWrap: 'wrap',
-            justifyContent: 'center', maxWidth: '90vw', opacity: busy ? 0.6 : 1 }}>
-          {profiles.map((p) => <ProfileCard key={p.id} profile={p} cardRef={p.current ? currentRef : undefined}
+            justifyContent: 'center', maxWidth: '90vw', opacity: busy && !chosen ? 0.6 : 1 }}>
+          {profiles.map((p, i) => <ProfileCard key={p.id} profile={p} cardRef={p.current ? currentRef : undefined}
+            index={i} chosen={chosen === p.id}
             onPick={() => pick(p)} onManage={() => manage(p)} />)}
-          {list?.supported && <AddProfileCard onAdd={add} />}
+          {list?.supported && <AddProfileCard onAdd={add} index={profiles.length} />}
         </Focusable>
         {list?.steam && (
-          <div style={{ position: 'relative', fontSize: '12px', color: V2.fgMuted }}>
+          <div className="pf-rise" style={{ position: 'relative', fontSize: '12px', color: V2.fgMuted, animationDelay: '120ms' }}>
             Signed in to Steam as <b style={{ color: V2.fg }}>{list.steam.name}</b>: the profile you pick opens here next time.
           </div>
         )}
