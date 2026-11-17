@@ -271,7 +271,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
           // Embedded: the account menu's scrim already blurs the page; a second
           // blur here would re-raster when the menu's went away, and some GPUs
           // skip the blur for a couple of frames then (sharp library flash).
-          ...(embedded ? { background: 'rgba(7,7,15,0.12)' } : {
+          ...(embedded ? {} : {
             background: 'rgba(7,7,15,0.55)',
             WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)',
           }),
