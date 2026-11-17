@@ -128,10 +128,13 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       <div style={{ position: 'relative' }}>
         <ProfileAvatar profile={profile} size={84} />
         {profile.current && (
-          <div style={{
-            position: 'absolute', right: '-2px', bottom: '-2px', width: '24px', height: '24px', borderRadius: '50%',
-            background: '#22c55e', border: `3px solid ${hot ? '#20202d' : '#12121b'}`, transition: 'border-color .14s ease', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}><FaCheck size={10} color="#fff" /></div>
+          // An SVG, not a bordered div: the focus scale re-rasterised the CSS
+          // circle at a fractional size and its edge visibly changed shape.
+          <svg width="24" height="24" viewBox="0 0 24 24" style={{ position: 'absolute', right: '-2px', bottom: '-2px', overflow: 'visible' }}>
+            <circle cx="12" cy="12" r="10.5" fill="#22c55e" stroke={hot ? '#20202d' : '#12121b'} strokeWidth="3"
+              style={{ transition: 'stroke .14s ease' }} />
+            <path d="M7.6 12.2l2.9 2.9 5.9-5.9" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         )}
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px', maxWidth: '100%',
