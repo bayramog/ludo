@@ -75,3 +75,20 @@ async def test_signed_in_identity_and_avatar_are_cached_for_the_picker(backend):
     [me] = (await backend.get_profiles())['profiles']
     assert me['username'] == 'covin' and me['role'] == 'admin'
     assert me['avatar'] == 'data:image/png;base64,AAAA'
+
+
+async def test_an_account_without_an_avatar_drops_the_old_face(backend):
+    # A profile that switched to an account with no avatar must not keep the
+    # previous account's picture in the picker.
+    backend._remember_profile_avatar('data:image/png;base64,AAAA')
+
+    class Client:
+        authenticated = True
+        def get_current_user(self):
+            return {'id': 6, 'username': 'ludo-test', 'avatar_path': ''}
+
+    backend._romm_client = Client()
+    backend._screenshot_mode = lambda: False
+    assert (await backend.get_avatar())['data_uri'] is None
+    [me] = (await backend.get_profiles())['profiles']
+    assert me['avatar'] is None

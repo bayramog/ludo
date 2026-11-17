@@ -4538,11 +4538,16 @@ class LudoBackend:
             # RomM returns the default avatar when avatar_path is empty; skip the
             # round-trip and let the frontend draw its own initial fallback.
             if not uid or not ap:
+                # An account without an avatar: the picker must not keep the
+                # face of whichever account this profile used before.
+                if uid:
+                    self._remember_profile_avatar(None)
                 return {'data_uri': None}
             ts = user.get('updated_at') or ''
             ck = ('avatar', uid, ap, ts)
             hit = self._cover_cache_get(ck)
             if hit is not None:
+                self._remember_profile_avatar(hit)
                 return {'data_uri': hit}
             url = urljoin(client.base_url, f"/api/users/{uid}/avatar")
             params = {'ts': ts} if ts else None
@@ -4569,11 +4574,15 @@ class LudoBackend:
 
     def _remember_profile_avatar(self, uri):
         """Keep the signed-in account's avatar beside the profile, so the
-        picker can show everyone's face without signing anyone in."""
+        picker can show everyone's face without signing anyone in. None
+        removes it: the account has no avatar."""
         if _profiles.launch is None:
             return
         try:
             target = _paths.config_dir() / self._PROFILE_AVATAR
+            if uri is None:
+                target.unlink(missing_ok=True)
+                return
             if not target.exists() or target.read_text(encoding='ascii') != uri:
                 target.write_text(uri, encoding='ascii')
         except Exception as e:
