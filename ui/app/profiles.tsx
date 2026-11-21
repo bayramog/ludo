@@ -59,7 +59,10 @@ export function ProfileAvatar({ profile, size }: { profile: Profile; size: numbe
 
 function subtitle(p: Profile) {
   if (!p.signed_in) return 'Not signed in yet';
-  return p.role ? `${p.username} · ${p.role.charAt(0).toUpperCase()}${p.role.slice(1)}` : p.username;
+  const role = p.role ? p.role.charAt(0).toUpperCase() + p.role.slice(1) : '';
+  // An unrenamed profile is named after its RomM user: don't say it twice.
+  const user = p.username && p.username.toLowerCase() !== p.name.toLowerCase() ? p.username : '';
+  return [user, role].filter(Boolean).join(' · ') || p.username;
 }
 
 
