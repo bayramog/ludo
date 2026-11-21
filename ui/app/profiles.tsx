@@ -182,7 +182,6 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
         <FaPlus size={28} />
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px' }}>Add profile</div>
-      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>Another RomM account</div>
       <div style={{ height: '15px' }} />
     </Focusable>
   );
