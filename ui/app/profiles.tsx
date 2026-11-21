@@ -144,15 +144,13 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name}</div>
       {subtitle(profile) && <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>{subtitle(profile)}</div>}
       {/* Its own flex item, so the card's gap spaces it like the rest. */}
-      {profile.steam.length ? (
+      {profile.steam.length > 0 && (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', boxSizing: 'border-box',
           padding: '3px 9px', lineHeight: 1.2, borderRadius: '999px', background: 'rgba(255,255,255,0.08)',
           color: V2.fg, fontSize: '11.5px' }}>
           <FaSteam size={11} style={{ flexShrink: 0 }} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.steam.join(', ')}</span>
         </div>
-      ) : (
-        <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2, padding: '3px 0' }}>Not linked to Steam</div>
       )}
       {profile.current
         ? <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#4ade80' }}>Playing now</div>
