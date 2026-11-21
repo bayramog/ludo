@@ -140,18 +140,20 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px', maxWidth: '100%',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name}</div>
-      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.45 }}>
-        {subtitle(profile)}<br />
-        {profile.steam.length ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', marginTop: '3px',
-            padding: '3px 9px', lineHeight: 1.2, borderRadius: '999px', background: 'rgba(255,255,255,0.08)', color: V2.fg }}>
-            <FaSteam size={11} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.steam.join(', ')}</span>
-          </span>
-        ) : 'Not linked to Steam'}
-      </div>
+      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.45 }}>{subtitle(profile)}</div>
+      {/* Its own flex item, so the card's 10px gap spaces it like the rest. */}
+      {profile.steam.length ? (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', boxSizing: 'border-box',
+          padding: '3px 9px', lineHeight: 1.2, borderRadius: '999px', background: 'rgba(255,255,255,0.08)',
+          color: V2.fg, fontSize: '11.5px' }}>
+          <FaSteam size={11} style={{ flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.steam.join(', ')}</span>
+        </div>
+      ) : (
+        <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2, padding: '3px 0' }}>Not linked to Steam</div>
+      )}
       {profile.current
-        ? <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#4ade80', marginTop: '2px' }}>Playing now</div>
+        ? <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#4ade80' }}>Playing now</div>
         : <div style={{ height: '15px' }} />}
     </Focusable>
   );
