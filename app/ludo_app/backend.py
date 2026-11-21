@@ -157,6 +157,37 @@ snapshot_file = CONFIG_DIR / 'library_snapshot.json'
 # siblings it would need were folded away when the snapshot was written.
 SNAPSHOT_SCHEMA = 4  # 4: rows and versions carry has_file_on_disk
 
+
+def _seed_snapshot(server_url):
+    """Another profile's snapshot of the same server, newest first, for a
+    profile that has none of its own yet.
+
+    The game rows, platform names and per-platform baselines describe the
+    server, not the RomM user, so a new profile can start from them and let
+    the connect reconcile fetch only what changed. Without this every new
+    profile paid a full library walk (minutes on a large server) for rows it
+    already had on disk. Returns the parsed snapshot or None."""
+    if not server_url:
+        return None
+    candidates = [_paths.profile_dir(p['id']) / snapshot_file.name
+                  for p in _profiles.load()['profiles']]
+    best = None
+    for path in candidates:
+        if path == snapshot_file or not path.exists():
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if data.get('schema') != SNAPSHOT_SCHEMA or data.get('server_url') != server_url:
+            continue
+        if best is None or (data.get('fetched_at') or '') > (best.get('fetched_at') or ''):
+            best = data
+    if best is not None:
+        logging.info("No library snapshot for this profile; seeding from another profile's")
+    return best
+
 # How long the last library fetch took, so a user can report it without having
 # to reproduce it while someone watches. Diagnosing the RomM fetch has meant
 # guessing at other people's servers from the outside, and "it's slow" is not a
@@ -1787,17 +1818,27 @@ class LudoBackend:
         snapshot from a different server or an incompatible schema. Returns the
         ISO fetched_at timestamp on success, else None."""
         try:
-            if not snapshot_file.exists():
-                return None
-            with open(snapshot_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            configured_url = self._settings.get('RomM', 'url') if self._settings else ''
+            seeded = False
+            if snapshot_file.exists():
+                with open(snapshot_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = _seed_snapshot(configured_url)
+                if data is None:
+                    return None
+                seeded = True
             if data.get('schema') != SNAPSHOT_SCHEMA:
                 logging.info("Library snapshot schema mismatch; ignoring")
                 return None
-            configured_url = self._settings.get('RomM', 'url') if self._settings else ''
             if configured_url and data.get('server_url') and data['server_url'] != configured_url:
                 logging.info("Library snapshot is for a different server; ignoring")
                 return None
+            if seeded:
+                # Collections are per RomM user, so another profile's are not
+                # ours: leave them for this connect's own fetch to fill.
+                for key in ('collections', 'smart_collections', 'virtual_collections'):
+                    data.pop(key, None)
             games = data.get('games') or []
             # The snapshot's is_downloaded/local_path are only as fresh as the
             # last fetch that wrote it, and downloads land between fetches. A
