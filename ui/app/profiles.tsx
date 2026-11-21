@@ -59,10 +59,9 @@ export function ProfileAvatar({ profile, size }: { profile: Profile; size: numbe
 
 function subtitle(p: Profile) {
   if (!p.signed_in) return 'Not signed in yet';
-  const role = p.role ? p.role.charAt(0).toUpperCase() + p.role.slice(1) : '';
-  // An unrenamed profile is named after its RomM user: don't say it twice.
-  const user = p.username && p.username.toLowerCase() !== p.name.toLowerCase() ? p.username : '';
-  return [user, role].filter(Boolean).join(' · ') || p.username;
+  // An unrenamed profile is named after its RomM user: only a renamed one
+  // needs to say which account it is.
+  return p.username && p.username.toLowerCase() !== p.name.toLowerCase() ? p.username : '';
 }
 
 
@@ -143,7 +142,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px', maxWidth: '100%',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name}</div>
-      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>{subtitle(profile)}</div>
+      {subtitle(profile) && <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>{subtitle(profile)}</div>}
       {/* Its own flex item, so the card's gap spaces it like the rest. */}
       {profile.steam.length ? (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', boxSizing: 'border-box',
