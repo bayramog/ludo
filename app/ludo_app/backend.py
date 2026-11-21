@@ -4632,6 +4632,12 @@ class LudoBackend:
             'current': _paths.profile_id(),
             'ask': bool(launch.get('ask')),
             'steam': steam,
+            # Every Steam account signed in on this machine, so a profile can
+            # be linked from Manage even when Ludo wasn't started by Steam.
+            'steam_accounts': [
+                {'id': a, 'name': i.get('account_name') or i.get('persona') or a,
+                 'linked_to': data['steam'].get(a)}
+                for a, i in sorted(accounts.items(), key=lambda kv: -kv[1].get('timestamp', 0))],
             'profiles': [self._profile_view(p, data, accounts) for p in data['profiles']],
         }
 
@@ -4683,6 +4689,17 @@ class LudoBackend:
             return {'status': 'unsupported'}
         try:
             _profiles.remove(profile_id)
+        except ValueError as e:
+            return {'status': 'error', 'message': str(e)}
+        return {'status': 'ok'}
+
+    async def link_profile_steam(self, profile_id, account):
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        if str(account) not in _profiles.steam_accounts():
+            return {'status': 'error', 'message': 'That Steam account is not on this machine'}
+        try:
+            _profiles.link_steam(profile_id, account)
         except ValueError as e:
             return {'status': 'error', 'message': str(e)}
         return {'status': 'ok'}

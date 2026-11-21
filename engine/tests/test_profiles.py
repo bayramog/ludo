@@ -108,6 +108,23 @@ class ProfilesTest(unittest.TestCase):
     def test_one_profile_never_asks(self):
         self.assertEqual(self.launch(SteamAppUser='mia.plays'), {'id': P.DEFAULT, 'steam': MIA, 'ask': False})
 
+    def test_one_profile_links_the_steam_account_silently(self):
+        self.launch(SteamAppUser='mia.plays')
+        self.assertEqual(P.load()['steam'], {MIA: P.DEFAULT})
+        # So a second profile later doesn't make this account pick again.
+        P.create('Leo')
+        self.assertEqual(self.launch(SteamAppUser='mia.plays'), {'id': P.DEFAULT, 'steam': MIA, 'ask': False})
+
+    def test_link_steam_moves_the_account_between_profiles(self):
+        leo = P.create('Leo')
+        P.link_steam(P.DEFAULT, MIA)
+        P.link_steam(leo, MIA)
+        self.assertEqual(P.load()['steam'], {MIA: leo})
+        with self.assertRaises(ValueError):
+            P.link_steam('nope', MIA)
+        with self.assertRaises(ValueError):
+            P.link_steam(leo, '')
+
     def test_unlinked_steam_account_asks_once_then_remembers(self):
         mia = P.create('Mia')
         first = self.launch(SteamAppUser='mia.plays')

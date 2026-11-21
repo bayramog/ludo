@@ -92,3 +92,16 @@ async def test_an_account_without_an_avatar_drops_the_old_face(backend):
     assert (await backend.get_avatar())['data_uri'] is None
     [me] = (await backend.get_profiles())['profiles']
     assert me['avatar'] is None
+
+
+async def test_link_from_manage_without_a_steam_launch(backend, monkeypatch):
+    monkeypatch.setattr(profiles, 'launch', {'id': profiles.DEFAULT, 'steam': None, 'ask': False})
+    created = (await backend.create_profile('Leo'))['id']
+    data = await backend.get_profiles()
+    assert data['steam'] is None
+    assert data['steam_accounts'] == [{'id': '12', 'name': 'mia.plays', 'linked_to': None}]
+    assert (await backend.link_profile_steam(created, '12'))['status'] == 'ok'
+    data = await backend.get_profiles()
+    assert data['steam_accounts'][0]['linked_to'] == created
+    assert next(p for p in data['profiles'] if p['id'] == created)['steam'] == ['mia.plays']
+    assert (await backend.link_profile_steam(created, '999'))['status'] == 'error'

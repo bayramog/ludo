@@ -7,7 +7,7 @@
 // {supported: false} and none of this renders.
 import { useEffect, useRef, useState, type Ref } from "react";
 import { Focusable, GamepadButton, ModalRoot, host, showModal } from "@ludo/host";
-import { FaCheck, FaLink, FaPen, FaPlus, FaTrash, FaUsers } from "react-icons/fa";
+import { FaCheck, FaPen, FaPlus, FaSteam, FaTrash, FaUnlink, FaUsers } from "react-icons/fa";
 import { V2 } from "./theme";
 import { V2Focus, V2_FOCUS_STYLE } from "./focus";
 import { MODAL_SCRIM_INSET, UserMenuRow, V2TextField, useArmedPress } from "./kit";
@@ -15,16 +15,18 @@ import { _forceGamepadFocus } from "./shell";
 import { toaster } from "./toast";
 import { dropProfileStorage, storageProfile, swapProfileStorage } from "./storage";
 import {
-  createProfile, getProfiles, removeProfile, renameProfile, switchProfile, unlinkProfileSteam,
+  createProfile, getProfiles, linkProfileSteam, removeProfile, renameProfile, switchProfile, unlinkProfileSteam,
 } from "./rpc";
 
 export type Profile = {
   id: string; name: string; custom_name: boolean; username: string; role: string;
   avatar: string | null; steam: string[]; signed_in: boolean; current: boolean; removable: boolean;
 };
+export type SteamAccount = { id: string; name: string; linked_to: string | null };
 export type ProfileList = {
   supported: boolean; current?: string; ask?: boolean;
   steam?: { id: string; name: string } | null; profiles?: Profile[];
+  steam_accounts?: SteamAccount[];
 };
 
 // Initials stand in for a missing avatar: one of a few gradients, stable per
@@ -60,10 +62,6 @@ function subtitle(p: Profile) {
   return p.role ? `${p.username} · ${p.role.charAt(0).toUpperCase()}${p.role.slice(1)}` : p.username;
 }
 
-function steamLine(p: Profile) {
-  if (!p.steam.length) return 'Not linked to a Steam user';
-  return `Opens for Steam user ${p.steam.join(', ')}`;
-}
 
 // Open a profile: the backend records the choice (and links the Steam account
 // that launched us), then the shell restarts it under that profile.
@@ -143,7 +141,14 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px', maxWidth: '100%',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name}</div>
       <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.45 }}>
-        {subtitle(profile)}<br />{steamLine(profile)}
+        {subtitle(profile)}<br />
+        {profile.steam.length ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', marginTop: '3px',
+            padding: '1px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', color: V2.fg }}>
+            <FaSteam size={11} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.steam.join(', ')}</span>
+          </span>
+        ) : 'Not linked to Steam'}
       </div>
       {profile.current
         ? <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#4ade80', marginTop: '2px' }}>Playing now</div>
@@ -267,7 +272,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
       }
     } finally { setBusy(false); }
   };
-  const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} onChanged={load} onPick={() => pick(p)} />);
+  const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} />);
 
   const profiles = list?.profiles ?? [];
   const body = (
@@ -322,8 +327,8 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
 }
 
 // The Details-button menu on a profile card.
-function ProfileManageModal({ profile, onChanged, onPick, closeModal }:
-  { profile: Profile; onChanged: () => void; onPick: () => void; closeModal?: () => void }) {
+function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, closeModal }:
+  { profile: Profile; accounts: SteamAccount[]; profiles: Profile[]; onChanged: () => void; onPick: () => void; closeModal?: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(profile.custom_name ? profile.name : '');
@@ -341,6 +346,15 @@ function ProfileManageModal({ profile, onChanged, onPick, closeModal }:
     done();
   };
   const unlink = async () => { await unlinkProfileSteam(profile.id); done(); };
+  const link = async (a: SteamAccount) => {
+    const r = await linkProfileSteam(profile.id, a.id);
+    if (r?.status !== 'ok') toaster.toast({ title: 'Could not link Steam user', body: r?.message || '' });
+    done();
+  };
+  // Every Steam account signed in on this machine that isn't on this profile
+  // yet. Works from a desktop launch too: linking only needs the account id.
+  const linkable = accounts.filter((a) => a.linked_to !== profile.id);
+  const ownerName = (id: string | null) => profiles.find((p) => p.id === id)?.name;
 
   return (
     <ModalRoot bHideCloseIcon onCancel={closeModal} onEscKeypress={closeModal}
@@ -384,8 +398,21 @@ function ProfileManageModal({ profile, onChanged, onPick, closeModal }:
                   onSelect={() => { closeModal?.(); onPick(); }} />
               )}
               <UserMenuRow icon={<FaPen size={14} />} label="Rename" onSelect={() => setRenaming(true)} />
+              {linkable.map((a) => (
+                <UserMenuRow key={a.id} icon={<FaSteam size={14} />} label={`Link Steam user ${a.name}`} onSelect={() => link(a)}
+                  trailing={a.linked_to && ownerName(a.linked_to) ? (
+                    <span style={{ marginLeft: 'auto', fontSize: '11px', color: V2.fgMuted, whiteSpace: 'nowrap' }}>
+                      from {ownerName(a.linked_to)}
+                    </span>
+                  ) : undefined} />
+              ))}
               {profile.steam.length > 0 && (
-                <UserMenuRow icon={<FaLink size={14} />} label={`Unlink Steam user ${profile.steam.join(', ')}`} onSelect={unlink} />
+                <UserMenuRow icon={<FaUnlink size={14} />} label={`Unlink Steam user ${profile.steam.join(', ')}`} onSelect={unlink} />
+              )}
+              {!accounts.length && (
+                <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '4px 12px 6px', lineHeight: 1.4 }}>
+                  No Steam account is signed in on this machine to link.
+                </div>
               )}
               {profile.removable && (
                 <>
