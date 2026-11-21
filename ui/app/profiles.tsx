@@ -111,7 +111,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
       style={{
         width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center',
         cursor: 'pointer',
         // Stays dark when focused: a see-through light fill turned grey over the
         // bright covers blurred behind the picker. Focus is the border and lift.
@@ -140,8 +140,8 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px', maxWidth: '100%',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name}</div>
-      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.45 }}>{subtitle(profile)}</div>
-      {/* Its own flex item, so the card's 10px gap spaces it like the rest. */}
+      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>{subtitle(profile)}</div>
+      {/* Its own flex item, so the card's gap spaces it like the rest. */}
       {profile.steam.length ? (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', boxSizing: 'border-box',
           padding: '3px 9px', lineHeight: 1.2, borderRadius: '999px', background: 'rgba(255,255,255,0.08)',
