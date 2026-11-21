@@ -112,7 +112,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
       style={{
-        width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
+        width: '176px', padding: '18px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center',
         cursor: 'pointer',
         // Stays dark when focused: a see-through light fill turned grey over the
@@ -166,8 +166,8 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
       style={{
-        width: '176px', padding: '22px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center',
+        width: '176px', padding: '18px 14px 16px', borderRadius: '16px', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center',
         cursor: 'pointer',
         // Dashed at rest, solid brand when focused so no dashes show under the ring.
         borderWidth: '1.5px', borderStyle: hot ? 'solid' : 'dashed', borderColor: hot ? V2.brand : 'rgba(255,255,255,0.22)',
@@ -182,7 +182,7 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
         <FaPlus size={28} />
       </div>
       <div style={{ fontSize: '16px', fontWeight: 700, color: V2.fg, marginTop: '4px' }}>Add profile</div>
-      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.45 }}>Sign in with another<br />RomM account</div>
+      <div style={{ fontSize: '11.5px', color: V2.fgMuted, lineHeight: 1.2 }}>Another RomM account</div>
       <div style={{ height: '15px' }} />
     </Focusable>
   );
