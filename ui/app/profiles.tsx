@@ -67,6 +67,9 @@ function subtitle(p: Profile) {
 
 // Open a profile: the backend records the choice (and links the Steam account
 // that launched us), then the shell restarts it under that profile.
+// True only when that restart is under way: picking the profile already in use
+// ('ok') must still close the picker, or its faded scrim stays over the app
+// and swallows every click.
 export async function openProfile(id: string): Promise<boolean> {
   const r = await switchProfile(id);
   if (r?.status === 'reload') {
@@ -76,7 +79,7 @@ export async function openProfile(id: string): Promise<boolean> {
     return true;
   }
   if (r?.status === 'error') toaster.toast({ title: 'Could not switch profile', body: r.message || '' });
-  return r?.status === 'ok';
+  return false;
 }
 
 // The account menu's "Switch profile" row, with the other profiles' faces.
