@@ -144,7 +144,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
         {subtitle(profile)}<br />
         {profile.steam.length ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', marginTop: '3px',
-            padding: '1px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', color: V2.fg }}>
+            padding: '3px 9px', lineHeight: 1.2, borderRadius: '999px', background: 'rgba(255,255,255,0.08)', color: V2.fg }}>
             <FaSteam size={11} style={{ flexShrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.steam.join(', ')}</span>
           </span>
