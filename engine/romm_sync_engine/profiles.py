@@ -397,6 +397,12 @@ def resolve(requested=None, env=None):
         last = data.get('last')
         choice = last if last in ids else DEFAULT
         ask = bool(steam) and len(ids) > 1 and not requested
+    if steam and len(ids) == 1 and steam not in data['steam']:
+        # Nothing to choose between: link the only profile now, so adding a
+        # second one later doesn't greet this account with the picker.
+        data = load()
+        data['steam'][steam] = choice
+        save(data)
     return {'id': choice, 'steam': steam, 'ask': ask}
 
 
@@ -415,6 +421,18 @@ def choose(profile_id, steam=None):
     data['last'] = profile_id
     if steam:
         data['steam'][str(steam)] = profile_id
+    save(data)
+
+
+def link_steam(profile_id, account):
+    """Link a Steam account to a profile, moving it off any other profile."""
+    data = load()
+    if not get(data, profile_id):
+        raise ValueError('No such profile')
+    account = str(account or '').strip()
+    if not account.isdigit():
+        raise ValueError('No such Steam account')
+    data['steam'][account] = profile_id
     save(data)
 
 
