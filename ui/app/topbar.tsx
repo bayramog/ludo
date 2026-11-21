@@ -12,7 +12,7 @@ import { _broadcastLibRefresh } from "./events";
 import { V2_FOCUS_STYLE } from "./focus";
 import { BiosDetailModal } from "./pages/bios";
 import { _lsAvail } from "./storage";
-import { ProfilePickerModal, SwitchProfileRow } from "./profiles";
+import { ProfilePickerModal, SwitchProfileRow, useCurrentProfileName } from "./profiles";
 // The bar across the top of the library, and the menus it opens.
 //
 // It is one component rather than per-page chrome because it has to stay put
@@ -722,6 +722,9 @@ export function DownloadChip({ count, pct }: { count: number; pct: number | null
 export function UserPill({ username, role, avatar, glimpse = true }:
   { username: string; role: string; avatar: string | null; glimpse?: boolean }) {
   const [active, setActive] = useState(false);
+  // Who is playing: the profile's name, or the RomM username where there are
+  // no profiles (or before the list arrives).
+  const label = useCurrentProfileName() || username;
   // Download glimpse: while anything is downloading, the avatar gains an
   // aggregate progress ring + count dot — zero extra top-bar width (the Deck's
   // bar is too tight for a separate chip).
@@ -765,8 +768,8 @@ export function UserPill({ username, role, avatar, glimpse = true }:
       </div>
       {/* Placeholder bar while the account is still loading, so the pill keeps
           its shape instead of collapsing and then jumping to full width. */}
-      {username
-        ? <span style={{ fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap' }}>{username}</span>
+      {label
+        ? <span style={{ fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</span>
         : <span style={{
             width: '58px', height: '9px', borderRadius: '5px',
             background: V2.bgElevated, opacity: 0.7,
