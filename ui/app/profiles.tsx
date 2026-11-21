@@ -12,7 +12,7 @@ import { V2 } from "./theme";
 import { V2Focus, V2_FOCUS_STYLE } from "./focus";
 import { MODAL_SCRIM_INSET, UserMenuRow, V2TextField, useArmedPress } from "./kit";
 import { _forceGamepadFocus } from "./shell";
-import { toaster } from "./toast";
+import { holdToasts, toaster } from "./toast";
 import { dropProfileStorage, storageProfile, swapProfileStorage } from "./storage";
 import {
   createProfile, getProfiles, linkProfileSteam, removeProfile, renameProfile, switchProfile, unlinkProfileSteam,
@@ -73,12 +73,12 @@ function subtitle(p: Profile) {
 export async function openProfile(id: string): Promise<boolean> {
   const r = await switchProfile(id);
   if (r?.status === 'reload') {
-    toaster.toast({ title: 'Switching profile…', body: '' });
+    toaster.toast({ urgent: true, title: 'Switching profile…', body: '' });
     swapProfileStorage(id);
     host.app.reloadBackend();
     return true;
   }
-  if (r?.status === 'error') toaster.toast({ title: 'Could not switch profile', body: r.message || '' });
+  if (r?.status === 'error') toaster.toast({ urgent: true, title: 'Could not switch profile', body: r.message || '' });
   return false;
 }
 
@@ -246,6 +246,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
   // Animated exit: fade the picker out, then unmount it. The chosen card
   // pulses first so a switch reads as a step, not a glitch.
   const [leaving, setLeaving] = useState(false);
+  useEffect(() => holdToasts(), []);
   const [chosen, setChosen] = useState<string | null>(null);
   const close = () => {
     if (leaving) return;
@@ -290,11 +291,11 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
     try {
       const r = await createProfile('');
       if (r?.status === 'reload' && r.id) {
-        toaster.toast({ title: 'New profile', body: 'Sign in with its RomM account.' });
+        toaster.toast({ urgent: true, title: 'New profile', body: 'Sign in with its RomM account.' });
         swapProfileStorage(r.id);
         host.app.reloadBackend();
       } else {
-        toaster.toast({ title: 'Could not add a profile', body: r?.message || '' });
+        toaster.toast({ urgent: true, title: 'Could not add a profile', body: r?.message || '' });
       }
     } finally { setBusy(false); }
   };
@@ -363,19 +364,19 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, cl
   const remove = useArmedPress(async () => {
     const r = await removeProfile(profile.id);
     if (r?.status === 'ok') dropProfileStorage(profile.id);
-    else toaster.toast({ title: 'Could not remove profile', body: r?.message || '' });
+    else toaster.toast({ urgent: true, title: 'Could not remove profile', body: r?.message || '' });
     done();
   });
   const saveName = async () => {
     const r = await renameProfile(profile.id, name);
-    if (r?.status !== 'ok') toaster.toast({ title: 'Could not rename profile', body: r?.message || '' });
+    if (r?.status !== 'ok') toaster.toast({ urgent: true, title: 'Could not rename profile', body: r?.message || '' });
     else window.dispatchEvent(new Event(PROFILES_CHANGED));
     done();
   };
   const unlink = async () => { await unlinkProfileSteam(profile.id); done(); };
   const link = async (a: SteamAccount) => {
     const r = await linkProfileSteam(profile.id, a.id);
-    if (r?.status !== 'ok') toaster.toast({ title: 'Could not link Steam user', body: r?.message || '' });
+    if (r?.status !== 'ok') toaster.toast({ urgent: true, title: 'Could not link Steam user', body: r?.message || '' });
     done();
   };
   // Every Steam account signed in on this machine that isn't on this profile

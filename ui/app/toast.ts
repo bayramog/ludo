@@ -79,9 +79,33 @@ type HostToastOptions = Parameters<typeof hostToaster.toast>[0];
  * ours, not the host's, so it is stripped before the options go through.
  */
 export const toaster = {
-  toast(options: HostToastOptions & { category?: ToastCategory }) {
-    const { category, ...rest } = (options ?? {}) as any;
+  toast(options: HostToastOptions & { category?: ToastCategory; urgent?: boolean }) {
+    const { category, urgent, ...rest } = (options ?? {}) as any;
     if (!toastsAllowed(category)) return null;
+    if (_holds > 0 && !urgent) {
+      if (_held.length < MAX_HELD) _held.push(rest);
+      return null;
+    }
     return hostToaster.toast(rest);
   },
 };
+
+// A full-screen chooser (the profile picker) holds the app's background toasts
+// while it is up: a "Library updated" popping over the blur pulled the eye
+// from the one choice on screen. They show once it closes; the chooser's own
+// messages pass `urgent` and show at once. Returns the release function.
+let _holds = 0;
+let _held: HostToastOptions[] = [];
+const MAX_HELD = 5;
+export function holdToasts(): () => void {
+  _holds++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--_holds > 0) return;
+    const out = _held;
+    _held = [];
+    for (const t of out) hostToaster.toast(t);
+  };
+}
