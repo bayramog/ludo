@@ -83,6 +83,28 @@ export async function openProfile(id: string): Promise<boolean> {
 }
 
 // The account menu's "Switch profile" row, with the other profiles' faces.
+// The name of the profile in use, for the top bar's pill: on a shared machine
+// the pill says who is playing, not which RomM account they sign in with.
+// '' until known, or on shells without profiles (the caller falls back to the
+// RomM username). Refreshed when a rename lands.
+const PROFILES_CHANGED = 'ludo:profiles-changed';
+export function useCurrentProfileName(): string {
+  const [name, setName] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const load = () => getProfiles()
+      .then((l: ProfileList) => {
+        const cur = l?.supported ? l.profiles?.find((p) => p.current) : undefined;
+        if (alive) setName(cur?.name || '');
+      })
+      .catch(() => {});
+    load();
+    window.addEventListener(PROFILES_CHANGED, load);
+    return () => { alive = false; window.removeEventListener(PROFILES_CHANGED, load); };
+  }, []);
+  return name;
+}
+
 export function SwitchProfileRow({ onOpen }: { onOpen: () => void }) {
   const [list, setList] = useState<ProfileList | null>(null);
   useEffect(() => { getProfiles().then(setList).catch(() => setList(null)); }, []);
@@ -347,6 +369,7 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, cl
   const saveName = async () => {
     const r = await renameProfile(profile.id, name);
     if (r?.status !== 'ok') toaster.toast({ title: 'Could not rename profile', body: r?.message || '' });
+    else window.dispatchEvent(new Event(PROFILES_CHANGED));
     done();
   };
   const unlink = async () => { await unlinkProfileSteam(profile.id); done(); };
