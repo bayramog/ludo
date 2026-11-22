@@ -65,6 +65,27 @@ function subtitle(p: Profile) {
 }
 
 
+// Restart the backend into another profile. The page reloads behind the boot
+// cover (index.html) until initProfiles has the new profile's screen up;
+// `picker` reopens the profile picker there (Back from a new profile's welcome).
+function restartInto(id: string, picker = false) {
+  sessionStorage.setItem('romm:switching', '1');
+  if (picker) sessionStorage.setItem('romm:reopen-picker', '1');
+  swapProfileStorage(id);
+  host.app.reloadBackend();
+}
+
+function liftBootCover() {
+  sessionStorage.removeItem('romm:switching');
+  const el = document.getElementById('boot-cover');
+  if (!el) return;
+  // Two frames for the first screen to paint, then fade out.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 250);
+  }));
+}
+
 // Open a profile: the backend records the choice (and links the Steam account
 // that launched us), then the shell restarts it under that profile.
 // True only when that restart is under way: picking the profile already in use
@@ -73,9 +94,7 @@ function subtitle(p: Profile) {
 export async function openProfile(id: string): Promise<boolean> {
   const r = await switchProfile(id);
   if (r?.status === 'reload') {
-    toaster.toast({ urgent: true, title: 'Switching profile…', body: '' });
-    swapProfileStorage(id);
-    host.app.reloadBackend();
+    restartInto(id);
     return true;
   }
   if (r?.status === 'error') toaster.toast({ urgent: true, title: 'Could not switch profile', body: r.message || '' });
@@ -87,8 +106,7 @@ export async function openProfile(id: string): Promise<boolean> {
 export async function discardNewProfile(): Promise<boolean> {
   const r = await discardProfile().catch((e: any) => ({ message: String(e?.message || e) }));
   if (r?.status === 'reload' && r.id) {
-    swapProfileStorage(r.id);
-    host.app.reloadBackend();
+    restartInto(r.id, true);
     return true;
   }
   toaster.toast({ urgent: true, title: 'Could not go back', body: r?.message || '' });
@@ -309,8 +327,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
       if (r?.status === 'reload' && r.id) {
         // Fade out as a pick does; the restart behind it takes a moment.
         setLeaving(true);
-        swapProfileStorage(r.id);
-        host.app.reloadBackend();
+        restartInto(r.id);
       } else {
         toaster.toast({ urgent: true, title: 'Could not add a profile', body: r?.message || '' });
       }
@@ -502,14 +519,17 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
 // swap them and reload once. Then, a Steam account with no profile yet on a
 // machine with more than one is asked who is playing.
 export async function initProfiles() {
+  const reopen = sessionStorage.getItem('romm:reopen-picker');
   try {
     const list: ProfileList = await getProfiles();
-    if (!list?.supported || !list.current) return;
-    if (storageProfile() !== list.current) {
+    if (list?.supported && list.current && storageProfile() !== list.current) {
       swapProfileStorage(list.current);
       location.reload();
-      return;
+      return;  // the cover stays up over this reload too
     }
-    if (list.ask) showModal(<ProfilePickerModal />);
+    sessionStorage.removeItem('romm:reopen-picker');
+    // Back from a new profile lands in the picker, on the profile it came from.
+    if (list?.supported && (list.ask || reopen)) showModal(<ProfilePickerModal />);
   } catch { /* single-profile shells have nothing to ask */ }
+  liftBootCover();
 }

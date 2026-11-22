@@ -7,6 +7,7 @@ Handles BIOS detection, verification, and synchronization
 from pathlib import Path
 import hashlib
 import os
+import stat
 import logging
 import threading
 import time
@@ -267,29 +268,37 @@ class BiosManager:
             return
         
         try:
-            # Scan all files in system directory
+            # Scan all files in system directory. One os.stat per file over
+            # plain strings: the pathlib walk stat-ed each file four times and
+            # cost a third of a second on a full RetroDECK bios folder, paid on
+            # every backend start.
+            root = str(self.system_dir)
             for file_path in self.system_dir.rglob('*'):
-                if file_path.is_file():
-                    # Skip very large files (likely not BIOS)
-                    if file_path.stat().st_size > 50 * 1024 * 1024:  # 50MB
-                        continue
-                    
-                    relative_path = file_path.relative_to(self.system_dir)
-                    entry = {
-                        'path': str(file_path),
-                        'size': file_path.stat().st_size,
-                        'modified': file_path.stat().st_mtime,
-                        'md5': None  # Calculate on demand to speed up scanning
-                    }
-                    self.installed_bios[str(relative_path)] = entry
-                    # Also key by bare filename. The scan is recursive but the
-                    # server only ever names files ("dc_boot.bin"), so keying on
-                    # the relative path alone meant a RetroDECK install that
-                    # already ships bios/dc/dc_boot.bin was reported as missing
-                    # and the file was re-downloaded flat, where flycast does not
-                    # read it. First hit wins: a flat file outranks a nested one
-                    # only by scan order, and either satisfies the requirement.
-                    self.installed_bios.setdefault(file_path.name, entry)
+                path = str(file_path)
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    continue
+                # Skip very large files (likely not BIOS)
+                if st.st_size > 50 * 1024 * 1024:  # 50MB
+                    continue
+                entry = {
+                    'path': path,
+                    'size': st.st_size,
+                    'modified': st.st_mtime,
+                    'md5': None  # Calculate on demand to speed up scanning
+                }
+                self.installed_bios[os.path.relpath(path, root)] = entry
+                # Also key by bare filename. The scan is recursive but the
+                # server only ever names files ("dc_boot.bin"), so keying on
+                # the relative path alone meant a RetroDECK install that
+                # already ships bios/dc/dc_boot.bin was reported as missing
+                # and the file was re-downloaded flat, where flycast does not
+                # read it. First hit wins: a flat file outranks a nested one
+                # only by scan order, and either satisfies the requirement.
+                self.installed_bios.setdefault(os.path.basename(path), entry)
 
         except Exception as e:
             self.log(f"Error scanning BIOS directory: {e}")

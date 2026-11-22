@@ -71,6 +71,8 @@ describe("setup wizard Back", { skip: SKIP }, () => {
       await page.waitForTimeout(400);
       assert.ok(srv.calls.includes("discard_profile"), "discard_profile was called");
       assert.equal(await reloads(page), 1, "the backend restarts once");
+      assert.equal(await page.evaluate(() => sessionStorage.getItem("romm:reopen-picker")), "1",
+        "the picker opens again after the restart");
       await page.close();
     } finally { await srv.close(); }
   });
