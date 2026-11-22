@@ -5,9 +5,6 @@
       "test_argosy_names.py",
       "test_auth_and_rejects.py",
       "test_batch_regressions.py",
-      "test_bios_folder.py",
-      "test_bios_readiness.py",
-      "test_cemu_standalone.py",
       "test_change_events.py",
       "test_cold_sync_guard.py",
       "test_core_download_crc.py",
@@ -15,21 +12,16 @@
       "test_core_index_offline.py",
       "test_core_pin_slug.py",
       "test_core_romm_platform_names.py",
-      "test_decky_stdlib_imports.py",
       "test_display_name.py",
       "test_document_files.py",
       "test_download_resume.py",
       "test_download_target_sorting.py",
-      "test_dreamcast_sync.py",
       "test_eden_addons.py",
       "test_eden_config.py",
       "test_eden_restore.py",
-      "test_emulator_saves.py",
       "test_fetch_abandon.py",
       "test_firmware.py",
       "test_firmware_download.py",
-      "test_flatpak_launcher_path.py",
-      "test_flatpak_rom_grant.py",
       "test_folder_saves.py",
       "test_foldered_single_file.py",
       "test_foreign_saves.py",
@@ -37,13 +29,11 @@
       "test_keys.py",
       "test_keys_sync.py",
       "test_latest_state_shared_folder.py",
-      "test_launch_core_dir.py",
       "test_no_file_grouping.py",
       "test_no_webbrowser_import.py",
       "test_orphan_skip.py",
       "test_physical_games.py",
       "test_platform_launch_regressions.py",
-      "test_play_sessions.py",
       "test_playlist_monitoring.py",
       "test_process_lock.py",
       "test_ps2_memcard.py",
@@ -59,15 +49,65 @@
       "test_settings_key.py",
       "test_standalone_download_guard.py",
       "test_state_folder_names.py",
-      "test_switch_content.py",
-      "test_switch_nsz.py",
       "test_switch_sibling_attribution.py",
-      "test_title_ids.py",
       "test_toast_flush.py",
       "test_windows_paths.py",
       "test_zip_bad_extra.py"
     ],
-    "windows_exclusions": {}
+    "windows_exclusions": {
+      "test_bios_folder.py": {
+        "reason": "Flatpak RetroArch config/first-launch fixture; Windows deliberately bypasses _unconfigured_tree and uses different install discovery.",
+        "issue": "https://github.com/bayramog/ludo/issues/9"
+      },
+      "test_bios_readiness.py": {
+        "reason": "Disc-serial/region contracts require the bundled Linux Sigil binary; also exercises POSIX symlink-relative save paths. Windows native library/profile support is pending.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_cemu_standalone.py": {
+        "reason": "Linux Cemu Flatpak/AppImage executable discovery, POSIX executable bits and XDG controller repair; Windows launch/profile contracts are pending.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
+      "test_decky_stdlib_imports.py": {
+        "reason": "Decky frozen Unix stdlib regression compares a pwd fallback with getpass after clearing identity variables; Windows has no pwd. Windows account/key contracts run in windows_paths/settings_key.",
+        "issue": "https://github.com/bayramog/ludo/issues/11"
+      },
+      "test_dreamcast_sync.py": {
+        "reason": "Product-number-derived VMU names require Sigil disc identification; the shipped Linux shared library cannot load on Windows.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_emulator_saves.py": {
+        "reason": "Live emulator ownership fixture executes a POSIX shell script and reads /proc PID status; needs native Windows process identity support.",
+        "issue": "https://github.com/bayramog/ludo/issues/10"
+      },
+      "test_flatpak_launcher_path.py": {
+        "reason": "Linux Flatpak/RetroDECK launcher and config tree resolution; Windows install/profile discovery follows a different path.",
+        "issue": "https://github.com/bayramog/ludo/issues/9"
+      },
+      "test_flatpak_rom_grant.py": {
+        "reason": "Linux Flatpak --filesystem command contract uses POSIX ROM paths; Windows must use native launcher contracts.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
+      "test_launch_core_dir.py": {
+        "reason": "Windows drive paths are stripped by the existing RetroArch :/ placeholder normalization, causing redundant core directory overrides; also includes Linux /usr/lib64 discovery.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
+      "test_play_sessions.py": {
+        "reason": "Live-session carry-on/boot identity assumes Linux process ownership; Windows native lifecycle work is pending.",
+        "issue": "https://github.com/bayramog/ludo/issues/10"
+      },
+      "test_switch_content.py": {
+        "reason": "Explicitly asserts the shipped Sigil library loads without an override; Windows Sigil binary is not bundled yet.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_switch_nsz.py": {
+        "reason": "Actual compressed-container round trips require libzstd/libcrypto; both are unavailable through the current Windows native loader.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_title_ids.py": {
+        "reason": "Bundled Sigil and real disc/title-ID extraction are unavailable on Windows until native dependencies are supplied.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      }
+    }
   },
   "app": {
     "portable": [

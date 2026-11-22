@@ -210,6 +210,7 @@ def save_report(report, destination):
 def run_suite(suite, patterns=(), native=False, report_dir=None, timeout=300):
     configure_output()
     report = new_report(suite)
+    report['selection_mode'] = 'native' if native else 'all'
     print(f'{suite}: {report["os"]} {report["os_version"]}; Python {report["python"]}; '
           f'interpreter={sys.executable}; commit={report["commit"]}', flush=True)
     try:

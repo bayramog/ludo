@@ -64,7 +64,7 @@ def main():
         check('registering one reports ok',
               E.register_external_content_dir('/roms/switch/extcontent', cfg), 'ok')
         check('and it reads back',
-              E.external_content_dirs(cfg), ['/roms/switch/extcontent'])
+              E.external_content_dirs(cfg), [str(Path('/roms/switch/extcontent'))])
         check('a second registration of the same path is a no-op',
               E.register_external_content_dir('/roms/switch/extcontent', cfg), 'already')
         check('is_registered agrees',
@@ -91,7 +91,7 @@ def main():
               E.register_external_content_dir('/other/extcontent', cfg), 'ok')
         check('both are listed in order',
               E.external_content_dirs(cfg),
-              ['/roms/switch/extcontent', '/other/extcontent'])
+              [str(Path('/roms/switch/extcontent')), str(Path('/other/extcontent'))])
 
         check('a backup of Eden’s file was kept',
               (Path(tmp) / 'qt-config.ini.ludo-bak').is_file(), True)
@@ -120,7 +120,7 @@ def main():
         check('a trailing [UI] section still takes an entry',
               E.register_external_content_dir('/roms/switch/extcontent', cfg), 'ok')
         check('and reads back',
-              E.external_content_dirs(cfg), ['/roms/switch/extcontent'])
+              E.external_content_dirs(cfg), [str(Path('/roms/switch/extcontent'))])
 
     # --- player 1's controller binding ---------------------------------
     check('SDL GUID packs bus/vid/pid/version little-endian',
