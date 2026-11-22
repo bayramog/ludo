@@ -368,7 +368,17 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
 // The Details-button menu on a profile card.
 function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, onClosed, closeModal }:
   { profile: Profile; accounts: SteamAccount[]; profiles: Profile[]; onChanged: () => void; onPick: () => void; onClosed?: () => void; closeModal?: () => void }) {
-  useEffect(() => () => onClosed?.(), []);
+  // Closed for real, not React's dev-mode check that unmounts and remounts
+  // every new component once: that one fired onClosed while the panel was
+  // still up, and the card behind it lost its highlight.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => { if (!mounted.current) onClosed?.(); }, 0);
+    };
+  }, []);
   const panelRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(profile.custom_name ? profile.name : '');
