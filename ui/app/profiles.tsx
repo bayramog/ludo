@@ -556,9 +556,6 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
                   <UserMenuRow icon={<FaTrash size={14} />} danger armed={remove.armed && !removing}
                     label={removing ? (saveCount ? 'Syncing saves…' : 'Removing…') : remove.armed ? 'Press again to remove' : 'Remove profile'}
                     onSelect={removing ? () => {} : remove.press} />
-                  <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '2px 12px 8px 39px', lineHeight: 1.4 }}>
-                    {saveCount ? 'Its saves are synced to RomM first, then removed from this device.' : 'Its saves on RomM are kept.'}
-                  </div>
                 </>
               )}
             </>
