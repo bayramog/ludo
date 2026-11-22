@@ -13488,6 +13488,13 @@ class AutoSyncManager:
                     # More specific detection - exclude our own AppImage
                     if name == 'retroarch':  # Exact binary name match
                         return True
+                    # The process name is the main thread's, and a core may
+                    # rename that thread (PPSSPP does), so check the program
+                    # too. The app_id test below can't catch this one: our
+                    # launches pass --appendconfig <app>-launch.cfg, which puts
+                    # the app's own name on RetroArch's command line.
+                    if cmdline and Path(cmdline[0]).name.lower() == 'retroarch':
+                        return True
                     elif len(cmdline) > 0:
                         cmd_str = ' '.join(cmdline).lower()
                         # Exclude our own app but include real RetroArch
@@ -17457,6 +17464,12 @@ class AutoSyncManager:
                 for rf in (rom_data.get('files') or []):
                     rf_name = rf.get('file_name', '')
                     if not rf_name:
+                        continue
+                    # Only the game's own files name a save. A file with no
+                    # category (snapshots older than this field, or a
+                    # top-level file RomM never labelled) still counts.
+                    category = rf.get('category')
+                    if category and category != 'game':
                         continue
                     rf_stem = Path(rf_name).stem
                     if rf_stem in (save_basename, clean_basename):

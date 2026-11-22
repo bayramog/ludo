@@ -79,3 +79,36 @@ async def test_cartridge_archive_stays_zipped(backend, tmp_path):
         z.writestr('Game.sfc', b'x')
     path, why = await backend._ready_to_boot({'rom_id': 1}, str(archive))
     assert why is None and path == str(archive) and archive.exists()
+
+
+def arcade_zip(path):
+    with zipfile.ZipFile(path, 'w') as z:
+        for name in ('c-2j.bp', 'c-2k.bp', 'v-5e.bpr', 'l-4m.bp'):
+            z.writestr(name, b'x')
+    return path
+
+
+async def test_arcade_romset_launches_zipped(backend, tmp_path):
+    # #99: a multi-file arcade romset is kept zipped, so Play must not then
+    # refuse it as an archive it "could not unpack".
+    archive = arcade_zip(tmp_path / 'dkong.zip')
+    g = {'rom_id': 1, 'local_path': str(archive), 'platform_slug': 'fbneo'}
+    path, why = await backend._ready_to_boot(g, str(archive))
+    assert why is None and path == str(archive) and archive.is_file()
+
+
+def test_arcade_download_stays_zipped_with_a_slug(backend, tmp_path):
+    archive = arcade_zip(tmp_path / 'dkong.zip')
+    assert backend._maybe_unzip_download(archive, 5, 'fbneo') == archive
+    assert archive.is_file() and not (tmp_path / 'dkong').exists()
+
+
+def test_arcade_variant_download_finds_its_slug(backend, tmp_path):
+    # #98: a regional sibling's rom_id is not a key in the grouped library,
+    # so the slug has to come through its parent.
+    backend._available_games = [{'rom_id': 1, 'platform_slug': 'fbneo',
+                                 'sibling_roms': [{'id': 7}]}]
+    backend._games_index_cache = None
+    archive = arcade_zip(tmp_path / 'dkong.zip')
+    assert backend._maybe_unzip_download(archive, 7) == archive
+    assert archive.is_file()

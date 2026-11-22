@@ -145,7 +145,7 @@ def test_install_stop_retains_lock_until_actual_io_finishes(backend, tmp_path, m
         Path(dest).write_bytes(b'fixture rom')
         outputs.append(Path(dest))
         return True, 'done'
-    def extract(dest, rom_id):
+    def extract(dest, rom_id, platform_slug=None):
         if stage == 'extraction':
             block()
         return dest

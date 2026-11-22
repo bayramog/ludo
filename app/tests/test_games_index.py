@@ -380,8 +380,8 @@ async def test_real_download_worker_updates_current_library(backend, monkeypatch
     monkeypatch.setattr(backend_mod.threading, 'Thread', thread)
     monkeypatch.setattr(backend_mod, '_resolve_download_path',
                         lambda directory, slug, name: (tmp_path / name, False))
-    monkeypatch.setattr(backend, '_maybe_unzip_download', lambda dest, rid: dest)
-    monkeypatch.setattr(backend, '_maybe_decompress_switch', lambda dest, rid: dest)
+    monkeypatch.setattr(backend, '_maybe_unzip_download', lambda dest, rid, slug=None: dest)
+    monkeypatch.setattr(backend, '_maybe_decompress_switch', lambda dest, rid, slug=None: dest)
     monkeypatch.setattr(backend, '_handle_switch_add_ons', lambda *a: None)
 
     def detail(url, timeout):
