@@ -17447,8 +17447,11 @@ class AutoSyncManager:
                     rf_name = rf.get('file_name', '')
                     if not rf_name:
                         continue
-                    category = rf.get("category", '')
-                    if not category or category != "game":
+                    # Only the game's own files name a save. A file with no
+                    # category (snapshots older than this field, or a
+                    # top-level file RomM never labelled) still counts.
+                    category = rf.get('category')
+                    if category and category != 'game':
                         continue
                     rf_stem = Path(rf_name).stem
                     if rf_stem in (save_basename, clean_basename):
