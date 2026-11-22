@@ -262,7 +262,7 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
 const PICKER_MOTION = `
   @keyframes pfRise { from { opacity: 0; translate: 0 6px; scale: 0.985; } to { opacity: 1; translate: none; scale: none; } }
   @keyframes pfPulse { 0% { transform: scale(1.04); } 45% { transform: scale(1.09); box-shadow: 0 0 0 4px rgba(139,116,232,.35), 0 0 28px rgba(139,116,232,.6), 0 16px 40px rgba(0,0,0,.55); } 100% { transform: scale(1.04); } }
-  .pf-scrim { transition: opacity .16s ease-in; }
+  .pf-scrim { transition: opacity .16s ease-in, background-color .45s ease, backdrop-filter .45s ease; }
   @keyframes pfFade { from { opacity: 0; } }
   .pf-embedded { animation: pfFade .18s .1s ease-out backwards; }
   .pf-scrim.pf-leaving { opacity: 0; pointer-events: none; }
@@ -284,6 +284,23 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving, solid }:
   { closeModal?: () => void; embedded?: boolean; onLeaving?: () => void; solid?: boolean }) {
   const [list, setList] = useState<ProfileList | null>(null);
   const [busy, setBusy] = useState(false);
+  // Opened at launch, the page behind is still filling its rows: hold a solid
+  // backdrop until it has settled (no new elements, images loaded), then
+  // fade over to the usual blurred view of it.
+  const [opaque, setOpaque] = useState(!!solid);
+  useEffect(() => {
+    if (!solid) return;
+    let last = -1, still = 0;
+    const started = Date.now();
+    const t = setInterval(() => {
+      const n = document.getElementsByTagName('*').length;
+      const loading = [...document.images].some((i) => !i.complete);
+      still = n === last && !loading ? still + 1 : 0;
+      last = n;
+      if (still >= 3 || Date.now() - started > 4000) { clearInterval(t); setOpaque(false); }
+    }, 100);
+    return () => clearInterval(t);
+  }, []);
   // Animated exit: fade the picker out, then unmount it. The chosen card
   // pulses first so a switch reads as a step, not a glitch.
   const [leaving, setLeaving] = useState(false);
@@ -369,7 +386,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving, solid }:
 
   const profiles = list?.profiles ?? [];
   const body = (
-    <Focusable noFocusRing className={`romm-ui pf-scrim${embedded ? ' pf-embedded' : ''}${solid && !embedded ? ' pf-solid' : ''}${leaving ? ' pf-leaving' : ''}`}
+    <Focusable noFocusRing className={`romm-ui pf-scrim${embedded ? ' pf-embedded' : ''}${opaque && !embedded ? ' pf-solid' : ''}${leaving ? ' pf-leaving' : ''}`}
         onCancelButton={close}
         onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) close(); }}
         style={{
@@ -381,7 +398,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving, solid }:
           // Solid when opened at launch: the page behind is still filling its
           // rows then, and that showed through the blur. It's ready by the
           // time a profile is picked and this fades away.
-          ...(embedded ? {} : solid ? {} : {
+          ...(embedded ? {} : {
             background: 'rgba(7,7,15,0.55)',
             WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)',
           }),
