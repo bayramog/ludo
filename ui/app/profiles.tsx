@@ -457,15 +457,24 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
   const [name, setName] = useState(profile.custom_name ? profile.name : '');
   useEffect(() => { const t = setTimeout(() => { if (panelRef.current) _forceGamepadFocus(panelRef.current); }, 60); return () => clearTimeout(t); }, [renaming]);
   const done = () => { onChanged(); closeModal?.(); };
-  const removeWith = async (saves: boolean) => {
-    const r = await removeProfile(profile.id, saves);
-    if (r?.status === 'ok') dropProfileStorage(profile.id);
-    else toaster.toast({ urgent: true, title: 'Could not remove profile', body: r?.message || '' });
-    done();
-  };
-  const remove = useArmedPress(() => removeWith(false));
-  const removeAll = useArmedPress(() => removeWith(true));
+  // Saves are synced to RomM before anything is deleted, so removing never
+  // loses progress. If that can't finish (offline, or a save the server
+  // disagrees with), the profile stays and says why.
+  const [removing, setRemoving] = useState(false);
   const saveCount = profile.local_saves ?? 0;
+  const remove = useArmedPress(async () => {
+    setRemoving(true);
+    const r = await removeProfile(profile.id, true).catch(() => null);
+    setRemoving(false);
+    if (r?.status === 'ok') { dropProfileStorage(profile.id); done(); return; }
+    const body = r?.status === 'offline'
+      ? `Its saves couldn't be synced to RomM, so nothing was removed. Try again when ${profile.name} can reach the server.`
+      : r?.status === 'unsynced'
+        ? `${r.pending} ${r.pending === 1 ? 'game has' : 'games have'} saves that didn't sync, so nothing was removed. Open ${profile.name} to sort them out first.`
+        : r?.message || '';
+    toaster.toast({ urgent: true, title: 'Profile not removed', body });
+    done();
+  });
   const saveName = async () => {
     const r = await renameProfile(profile.id, name);
     if (r?.status !== 'ok') toaster.toast({ urgent: true, title: 'Could not rename profile', body: r?.message || '' });
@@ -544,21 +553,12 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
               {profile.removable && (
                 <>
                   <div style={{ height: '1px', background: V2.border, margin: '4px' }} />
-                  <UserMenuRow icon={<FaTrash size={14} />} danger armed={remove.armed}
-                    label={remove.armed ? 'Press again to remove' : 'Remove profile'} onSelect={remove.press} />
+                  <UserMenuRow icon={<FaTrash size={14} />} danger armed={remove.armed && !removing}
+                    label={removing ? (saveCount ? 'Syncing saves…' : 'Removing…') : remove.armed ? 'Press again to remove' : 'Remove profile'}
+                    onSelect={removing ? () => {} : remove.press} />
                   <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '2px 12px 8px 39px', lineHeight: 1.4 }}>
-                    {saveCount ? 'Its saves on RomM and on this device are kept.' : 'Its saves on RomM are kept.'}
+                    {saveCount ? 'Its saves are synced to RomM first, then removed from this device.' : 'Its saves on RomM are kept.'}
                   </div>
-                  {saveCount > 0 && (
-                    <>
-                      <UserMenuRow icon={<FaTrash size={14} />} danger armed={removeAll.armed}
-                        label={removeAll.armed ? 'Press again to delete' : 'Remove profile and its saves'} onSelect={removeAll.press} />
-                      <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '2px 12px 8px 39px', lineHeight: 1.4 }}>
-                        Also deletes its {saveCount} save and state {saveCount === 1 ? 'file' : 'files'} on this device.
-                        Copies on RomM are kept; anything not uploaded yet is lost.
-                      </div>
-                    </>
-                  )}
                 </>
               )}
             </>
