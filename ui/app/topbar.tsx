@@ -539,7 +539,6 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
             </div>
           </div>
           <div style={{ height: '1px', background: V2.border, margin: '0 4px 4px' }} />
-          <SwitchProfileRow onOpen={() => setPicker(true)} />
           <UserMenuRow icon={<FaDownload size={15} />}
             label={`Downloads${dlGlimpse.count > 0 ? ` (${dlGlimpse.count})` : ''}`}
             onSelect={() => go("/romm-sync-downloads")} />
@@ -553,6 +552,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           <UserMenuRow icon={<FaPuzzlePiece size={15} />} label="Emulator Cores" onSelect={() => go("/romm-sync-cores")} />
           <UserMenuRow icon={<FaMicrochip size={15} />} label="Firmware / BIOS" onSelect={() => go("/romm-sync-bios")} />
           <UserMenuRow icon={<FaCog size={15} />} label="Settings" onSelect={() => go("/romm-sync-settings")} />
+          <SwitchProfileRow onOpen={() => setPicker(true)} />
           {canExit && (
             <>
               <div style={{ height: '1px', background: V2.border, margin: '4px 4px' }} />
