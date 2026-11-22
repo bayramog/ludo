@@ -19145,40 +19145,48 @@ class AutoSyncLock:
         self.lock_fd = None
     
     def acquire(self, instance_id):
-        """Acquire exclusive lock"""
+        """Acquire exclusive lock.
+
+        The file is opened without truncating it, so a process that loses the
+        race doesn't wipe the owner's details, and only real contention counts
+        as "held elsewhere"; other errors are logged as what they are.
+        """
+        import errno
         import fcntl
-        
-        try:
-            # Open lock file
-            self.lock_fd = open(self.lock_file, 'w')
-            
-            # Try to acquire exclusive lock (non-blocking)
-            fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            
-            # Write instance info
-            self.lock_fd.write(f"{os.getpid()}:{instance_id}:{time.time()}\n")
-            self.lock_fd.flush()
-            
+
+        if self.lock_fd:
             return True
-            
-        except (IOError, OSError):
-            # Lock already held by another process
-            if self.lock_fd:
-                self.lock_fd.close()
-                self.lock_fd = None
+        fd = None
+        try:
+            fd = open(self.lock_file, 'a+')
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            if fd:
+                fd.close()
+            if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+                logging.warning(f"auto-sync lock unavailable ({self.lock_file}): {e}")
             return False
-    
+        try:
+            fd.seek(0)
+            fd.truncate()
+            fd.write(f"{os.getpid()}:{instance_id}:{time.time()}\n")
+            fd.flush()
+        except OSError:
+            pass  # The contents are only diagnostic; the flock is the lock.
+        self.lock_fd = fd
+        return True
+
     def release(self):
-        """Release the lock"""
+        """Release the lock, leaving the file in place.
+
+        Never unlink it: a process that lost the race would delete the file the
+        owner still holds, and the next acquire would lock a fresh file, giving
+        two owners at once (found by bayramog in #93).
+        """
         if self.lock_fd:
             self.lock_fd.close()  # Automatically releases flock
             self.lock_fd = None
-            
-        try:
-            self.lock_file.unlink()  # Clean up lock file
-        except FileNotFoundError:
-            pass
-    
+
     def __del__(self):
         self.release()
 

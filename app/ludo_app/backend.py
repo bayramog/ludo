@@ -6266,13 +6266,20 @@ class LudoBackend:
     def _take_install_lock():
         """An exclusive lock on installs.lock, or None if another process has it.
         The open file is the lock: it is released when the process exits."""
+        import errno
         import fcntl
-        f = open(CONFIG_DIR / 'installs.lock', 'w')
+        # 'a', not 'w': a process that loses the race must not truncate the
+        # file the owner holds. Only contention means "another Ludo has it".
+        f = None
         try:
+            f = open(CONFIG_DIR / 'installs.lock', 'a')
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return f
-        except OSError:
-            f.close()
+        except OSError as e:
+            if f:
+                f.close()
+            if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+                logging.warning(f"[INSTALL] install lock unavailable: {e}")
             return None
 
     def _handle_install(self, req, device_id, active, stop_event, client):
