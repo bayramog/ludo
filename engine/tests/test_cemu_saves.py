@@ -47,6 +47,26 @@ def write(path, data):
     return path
 
 
+def _zstd_compress():
+    """A zstd compressor, or None. Python 3.14 has one built in; CI's 3.11
+    only if backports.zstd or pyzstd happens to be installed."""
+    try:
+        from compression import zstd
+        return zstd.compress
+    except ImportError:
+        pass
+    try:
+        from backports import zstd
+        return zstd.compress
+    except ImportError:
+        pass
+    try:
+        import pyzstd
+        return pyzstd.compress
+    except ImportError:
+        return None
+
+
 def make_wua(path, root_name, meta_xml, compress=True):
     """A minimal ZArchive: root/<root_name>/meta/meta.xml, one data block."""
     names = bytearray()
@@ -61,8 +81,7 @@ def make_wua(path, root_name, meta_xml, compress=True):
     n_title, n_meta, n_xml = name(root_name), name('meta'), name('meta.xml')
     block = meta_xml.ljust(C._ZAR_BLOCK, b'\0') if not compress else meta_xml
     if compress:
-        from compression import zstd  # the test interpreter is 3.14
-        stored = zstd.compress(block)
+        stored = _zstd_compress()(block)
     else:
         stored = block
     tree = b''.join([
@@ -266,14 +285,18 @@ def test_title_ids(tmp):
     write(game / 'code/terraria.rpx', b'rpx')
     check('folder', C.title_id_from_rom(game), TID)
     check('rpx', C.title_id_from_rom(game / 'code/terraria.rpx'), TID)
-    zeroed = make_wua(tmp / 'z.wua', '0000000000000000_v0', meta)
-    check('wua meta.xml (zstd)', C.title_id_from_rom(zeroed), TID)
+    zst = _zstd_compress() is not None
+    if zst:
+        zeroed = make_wua(tmp / 'z.wua', '0000000000000000_v0', meta)
+        check('wua meta.xml (zstd)', C.title_id_from_rom(zeroed), TID)
+    else:
+        print('skip wua meta.xml (zstd): no zstd module on this Python')
     stored = make_wua(tmp / 's.wua', '0000000000000000_v0', meta, compress=False)
     check('wua meta.xml (stored)', C.title_id_from_rom(stored), TID)
-    named = make_wua(tmp / 'n.wua', '000500001010ed00_v32', b'<menu/>')
+    named = make_wua(tmp / 'n.wua', '000500001010ed00_v32', b'<menu/>', compress=zst)
     check('wua root name', C.title_id_from_rom(named), '000500001010ED00')
     wrapped = tmp / 'wrapped'
-    make_wua(wrapped / 'Game.wua', '0000000000000000_v0', meta)
+    make_wua(wrapped / 'Game.wua', '0000000000000000_v0', meta, compress=zst)
     check('folder holding a wua', C.title_id_from_rom(wrapped), TID)
     check('name tag', C.title_id_from_rom(tmp / 'Game [0005000010101C00].wux'), '0005000010101C00')
     check('nothing', C.title_id_from_rom(tmp / 'Game.wux'), None)
