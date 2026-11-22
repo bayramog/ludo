@@ -4681,6 +4681,8 @@ class LudoBackend:
             'signed_in': signed_in,
             'current': pid == _paths.profile_id(),
             'removable': pid != _profiles.DEFAULT and pid != _paths.profile_id(),
+            # Files in its own save/state folders, for Remove's confirm.
+            'local_saves': _profiles.local_save_count(pid),
         }
 
     async def get_profiles(self):
@@ -4768,11 +4770,11 @@ class LudoBackend:
             return {'status': 'error', 'message': str(e)}
         return {'status': 'ok'}
 
-    async def remove_profile(self, profile_id):
+    async def remove_profile(self, profile_id, delete_saves=False):
         if _profiles.launch is None:
             return {'status': 'unsupported'}
         try:
-            _profiles.remove(profile_id)
+            _profiles.remove(profile_id, delete_saves=bool(delete_saves))
         except ValueError as e:
             return {'status': 'error', 'message': str(e)}
         return {'status': 'ok'}
