@@ -126,10 +126,13 @@ export function SwitchProfileRow({ onOpen }: { onOpen: () => void }) {
 
 // Hover moves focus, it doesn't light a card by itself: with both, the focused
 // card and the hovered one were lit at once. One highlight, one A target.
-function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
+function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen, managing }:
   { profile: Profile; onPick: () => void; onManage: () => void; cardRef?: Ref<HTMLDivElement>;
-    index: number; chosen: boolean }) {
-  const [hot, setHot] = useState(false);
+    index: number; chosen: boolean; managing: boolean }) {
+  const [focused, setHot] = useState(false);
+  // Manage takes focus into its panel; the card it was opened on stays lit
+  // behind it, so the highlight doesn't drop out and come back on return.
+  const hot = focused || managing;
   return (
     <Focusable noFocusRing ref={cardRef} onActivate={onPick} onClick={onPick}
       className={`pf-card${chosen ? ' pf-chosen' : ''}`} data-pid={profile.id}
@@ -302,11 +305,16 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
   // Back from Manage, focus returns to the card it was opened on (or the one
   // in use, if that profile was just removed): by itself it only came back for
   // the pad, so a mouse user returned to a picker with nothing selected.
+  const [managing, setManaging] = useState<string | null>(null);
   const refocus = (id: string) => setTimeout(() => {
+    setManaging(null);
     const card = rowRef.current?.querySelector<HTMLElement>(`[data-pid="${id}"]`) || currentRef.current;
     if (card) _forceGamepadFocus(card);
   }, 80);
-  const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} onClosed={() => refocus(p.id)} />);
+  const manage = (p: Profile) => {
+    setManaging(p.id);
+    showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} onClosed={() => refocus(p.id)} />);
+  };
 
   const profiles = list?.profiles ?? [];
   const body = (
@@ -340,7 +348,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
           style={{ position: 'relative', display: 'flex', gap: '18px', alignItems: 'stretch', flexWrap: 'wrap',
             justifyContent: 'center', maxWidth: '90vw', opacity: busy && !chosen ? 0.6 : 1 }}>
           {profiles.map((p, i) => <ProfileCard key={p.id} profile={p} cardRef={p.current ? currentRef : undefined}
-            index={i} chosen={chosen === p.id}
+            index={i} chosen={chosen === p.id} managing={managing === p.id}
             onPick={() => pick(p)} onManage={() => manage(p)} />)}
           {list?.supported && <AddProfileCard onAdd={add} index={profiles.length} />}
         </Focusable>
