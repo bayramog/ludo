@@ -1260,9 +1260,10 @@ def _is_own_appimage(name):
 # "Nintendo - Switch" all land on the same entry.
 # `args` is the argv after the executable; '{rom}' is replaced with the ROM path.
 # ---------------------------------------------------------------------------
-# Names the libretro PS2 core reports, which RetroArch uses for its per-core
-# folders: older and RetroDECK builds first, the current buildbot build second.
-PS2_CORE_NAMES = ('LRPS2', 'ParaLLEl PS2')
+# Names the libretro PS2 cores report, which RetroArch uses for its per-core
+# folders: LRPS2's older and RetroDECK builds first, then its current buildbot
+# build, then PCEE2 (pcee2_libretro), which follows upstream PCSX2.
+PS2_CORE_NAMES = ('LRPS2', 'ParaLLEl PS2', 'PCEE2')
 
 # How long a failed core list fetch stands before anything asks again.
 BUILDBOT_RETRY_SECONDS = 300
@@ -7492,12 +7493,12 @@ class RetroArchInterface:
             # BIOS files are put. MAME only looks beside the ROM, so every Neo
             # Geo game exits with "Required files are missing" under it.
             'Arcade': ['fbneo', 'mame', 'fbalpha'],
-            'PlayStation 2': ['pcsx2', 'play'],
+            'PlayStation 2': ['pcsx2', 'pcee2', 'play'],
             'Nintendo GameCube': ['dolphin'],
             'Sega Dreamcast': ['flycast', 'redream'],
             'Atari 2600': ['stella'],
             'Sony - PlayStation': ['pcsx_rearmed', 'swanstation', 'beetle_psx', 'beetle_psx_hw'],
-            'Sony - PlayStation 2': ['pcsx2', 'play'],
+            'Sony - PlayStation 2': ['pcsx2', 'pcee2', 'play'],
             'Sony - PlayStation Portable': ['ppsspp'],
             'Nintendo - Nintendo 3DS': ['citra'],
             'Nintendo - Game Boy': ['gambatte', 'sameboy', 'tgbdual'],
@@ -7573,6 +7574,7 @@ class RetroArchInterface:
             
             # PlayStation 2 cores
             'pcsx2': 'PCSX2',
+            'pcee2': 'PCEE2',
             'play': 'Play!',
             
             # GameCube cores
@@ -9256,8 +9258,8 @@ class RetroArchInterface:
             'gbc': ['gambatte', 'sameboy', 'tgbdual'],
             'game boy': ['gambatte', 'sameboy', 'tgbdual'],
             'gb': ['gambatte', 'sameboy', 'tgbdual'],
-            'playstation 2': ['pcsx2', 'play'],
-            'ps2': ['pcsx2', 'play'],
+            'playstation 2': ['pcsx2', 'pcee2', 'play'],
+            'ps2': ['pcsx2', 'pcee2', 'play'],
             'playstation portable': ['ppsspp'],
             'psp': ['ppsspp'],
             # Prefer SOFTWARE-rendered PSX cores first. The hardware-renderer
@@ -9496,6 +9498,7 @@ class RetroArchInterface:
         try:
             self._ensure_ps2_bios(rom_path, core_path, regions)
             self._ensure_ps2_memcards(rom_path, core_path)
+            self._ensure_pcee2_card(rom_path, core_path)
         except Exception as e:
             print(f"⚠️  PS2 launch setup skipped: {e}")
 
@@ -9547,7 +9550,10 @@ class RetroArchInterface:
         RetroDECK owns and rewrites. Per-game also means a PAL and an NTSC title
         in the same library each get the right console.
         """
-        if 'pcsx2' not in Path(core_path).name.lower():
+        # PCEE2 reads the same option, and its "auto" takes the first valid
+        # BIOS it finds, so it has exactly the same multi-region problem.
+        core_file = Path(core_path).name.lower()
+        if 'pcsx2' not in core_file and 'pcee2' not in core_file:
             return
         want = self._ps2_disc_region(rom_path, regions)
         if not want:
@@ -9589,6 +9595,75 @@ class RetroArchInterface:
             return
         for opt_file in self._ps2_option_files(rom_path):
             self._write_core_option(opt_file, self.PCSX2_SHARED_CARDS_KEY, 'disabled')
+
+    # PCEE2's slot 1 card: a filename picked from <system>/pcsx2/memcards.
+    PCEE2_SLOT1_KEY = 'pcsx2_memcard_slot1_file'
+    PCEE2_SLOT2_ENABLE_KEY = 'pcsx2_memcard_slot2_enable'
+
+    def _pcee2_card_home(self, rom_path):
+        """Where this game's card lives in the save folder: the same place LRPS2
+        keeps its per-content card, so both cores share one card per game and
+        every part of PS2 save sync (discovery, packing, restore) finds it."""
+        saves = (getattr(self, 'save_dirs', None) or {}).get('saves')
+        if not saves:
+            return None
+        folder = Path(saves)
+        mode = self.get_save_subdir_mode('saves')
+        if mode == 'core':
+            folder = next((folder / n for n in reversed(PS2_CORE_NAMES)
+                           if (folder / n).is_dir()), folder / 'PCEE2')
+        elif mode == 'content':
+            folder = folder / Path(rom_path).parent.name
+        return folder / f"{Path(rom_path).stem}.ps2"
+
+    def _ensure_pcee2_card(self, rom_path, core_path):
+        """Give PCEE2 a card per game, like LRPS2's per-content cards.
+
+        PCEE2 has no per-content card option: it shares Mcd001.ps2 between
+        every game, which no save sync can attribute. What it does have is a
+        slot 1 option choosing any card in <system>/pcsx2/memcards, listed
+        when the core starts. So the game's card lives where LRPS2 keeps its
+        own (see _pcee2_card_home), a link to it goes in the memcards folder,
+        and a per-game option points slot 1 at the link and turns slot 2 off.
+        PCEE2 opens a .ps2 card "r+b" and writes it in place
+        (MemoryCardFile.cpp), so the link stays a link.
+
+        A real card already in memcards under the game's name is the user's
+        own and is left alone, unlinked.
+        """
+        if 'pcee2' not in Path(core_path).name.lower():
+            return
+        if not self.bios_manager or not self.bios_manager.system_dir:
+            return
+        card = self._pcee2_card_home(rom_path)
+        if not card:
+            return
+        memcards = Path(self.bios_manager.system_dir) / 'pcsx2' / 'memcards'
+        memcards.mkdir(parents=True, exist_ok=True)
+        link = memcards / card.name
+        if link.exists() and not link.is_symlink():
+            print(f"ℹ️  PCEE2: {link} is a card of its own; not linking {card.name}")
+            return
+        if not card.exists():
+            card.parent.mkdir(parents=True, exist_ok=True)
+            card.write_bytes(ps2_memcard.format_card())
+        if link.is_symlink():
+            try:
+                if link.resolve() == card.resolve():
+                    link = None
+                else:
+                    link.unlink()
+            except OSError:
+                link.unlink()
+        if link is not None:
+            link.symlink_to(card)
+        for opt_file in self._ps2_option_files(rom_path):
+            if opt_file.parent.name == 'PCEE2':
+                self._write_core_option(opt_file, self.PCEE2_SLOT1_KEY, card.name)
+                # Slot 2's default, Mcd002.ps2, is usually missing, and PCEE2
+                # then falls back to the first card it lists: this one, open
+                # twice. Seen on a real run: both slots on the same file.
+                self._write_core_option(opt_file, self.PCEE2_SLOT2_ENABLE_KEY, 'disabled')
 
     def _ps2_option_files(self, rom_path):
         """RetroArch's per-game core-options files for this ROM.
@@ -12072,8 +12147,19 @@ class RetroArchInterface:
                 # someone pointed at a whole drive.
                 directories_to_scan = self._save_scan_dirs(directory)
                 
+                root_real = directory.resolve()
                 for scan_dir in directories_to_scan:
                     for file_path in scan_dir.glob('*'):
+                        # A link to a file that is itself in this save folder
+                        # is the same save twice: Ludo's link for PCEE2 (see
+                        # _ensure_pcee2_card) lands inside the saves tree on
+                        # RetroDECK 0.11, whose pcsx2/memcards lives there.
+                        if file_path.is_symlink():
+                            try:
+                                if file_path.resolve().is_relative_to(root_real):
+                                    continue
+                            except OSError:
+                                continue
                         if file_path.is_file():
                             # Determine emulator from directory structure
                             if file_path.parent == directory:
