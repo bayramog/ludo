@@ -71,6 +71,13 @@ function subtitle(p: Profile) {
 function restartInto(id: string, picker = false) {
   sessionStorage.setItem('romm:switching', '1');
   if (picker) sessionStorage.setItem('romm:reopen-picker', '1');
+  // Fade the whole window to the boot cover's colour now, so the restart reads
+  // as one fade out and in: without it the screen behind the picker showed
+  // again for a moment, then cut to black.
+  const veil = document.createElement('div');
+  veil.style.cssText = 'position:fixed;inset:0;background:#07070f;z-index:2147483647;opacity:0;transition:opacity .16s ease';
+  document.body.appendChild(veil);
+  requestAnimationFrame(() => { veil.style.opacity = '1'; });
   swapProfileStorage(id);
   host.app.reloadBackend();
 }
@@ -346,6 +353,19 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
     setManaging(p.id);
     showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} onClosed={() => refocus(p.id)} />);
   };
+
+  // Opened at launch (Back from a new profile), the page behind readies its own
+  // focus once its games load and took it off the card: hold it in here.
+  useEffect(() => {
+    const keep = (e: FocusEvent) => {
+      const scrim = rowRef.current?.closest('.pf-scrim');
+      if (!scrim || leaving || managing || scrim.contains(e.target as Node)) return;
+      const t = currentRef.current || rowRef.current?.querySelector<HTMLElement>('[tabindex]');
+      if (t) _forceGamepadFocus(t);
+    };
+    document.addEventListener('focusin', keep);
+    return () => document.removeEventListener('focusin', keep);
+  }, [leaving, managing]);
 
   const profiles = list?.profiles ?? [];
   const body = (
