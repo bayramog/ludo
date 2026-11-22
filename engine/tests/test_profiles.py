@@ -172,6 +172,21 @@ class ProfilesTest(unittest.TestCase):
         self.assertEqual(data['steam'], {})
         self.assertEqual(self.launch(SteamAppUser='mia.plays')['id'], P.DEFAULT)
 
+    def test_discard_returns_to_the_profile_it_was_added_from(self):
+        mia = P.create('Mia')
+        new = P.create('', copy_from=mia)
+        save_root = paths.library_dir() / 'profiles' / new
+        (save_root / 'saves').mkdir(parents=True)
+        self.assertEqual(P.discard(new), mia)
+        self.assertEqual(self.launch()['id'], mia)
+        data = P.load()
+        self.assertNotIn(new, [p['id'] for p in data['profiles']])
+        self.assertNotIn('discard', data)
+        self.assertFalse(paths.profile_dir(new).exists())
+        self.assertFalse(save_root.exists())
+        with self.assertRaises(ValueError):
+            P.discard(P.DEFAULT)
+
     def test_cannot_remove_the_profile_in_use(self):
         mia = P.create('Mia')
         paths._locked, paths._profile_locked, paths._profile = False, False, P.DEFAULT

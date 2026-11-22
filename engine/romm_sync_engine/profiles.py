@@ -320,6 +320,7 @@ def resolve(requested=None, env=None):
     steam = current_steam_account(env)
     ids = {p['id'] for p in data['profiles']}
     choice, ask = None, False
+    _drop_discarded(data, ids)
     pending = data.pop('next', None)
     if pending in ids:
         choice = pending
@@ -439,9 +440,55 @@ def create(name='', copy_from=None):
             out.write(f)
         os.chmod(target / 'settings.ini', 0o600)
     data['profiles'].append({'id': profile_id, 'name': ' '.join((name or '').split())[:40],
-                             'created': int(time.time())})
+                             'created': int(time.time()),
+                             # where Back on its welcome screen returns to
+                             'from': copy_from or paths.profile_id()})
     save(data)
     return profile_id
+
+
+def _drop_discarded(data, ids):
+    """Finish a discard(): the profile it left can go now that it is closed."""
+    gone = data.pop('discard', None)
+    if not gone:
+        return
+    if gone in ids and gone != DEFAULT and gone != data.get('next'):
+        _forget(data, gone)
+        ids.discard(gone)
+        shutil.rmtree(paths.profile_dir(gone), ignore_errors=True)
+        dirs = save_dirs(gone)
+        for d in (dirs['saves'], dirs['states'], dirs['saves'].parent):
+            try:
+                d.rmdir()   # only if empty: a never-used profile left nothing
+            except OSError:
+                pass
+    save(data)
+
+
+def discard(profile_id):
+    """Back out of a just-added, never signed-in profile: open the profile it
+    was added from and delete this one on the next start, once it is closed.
+    Returns the profile to open."""
+    data = load()
+    entry = get(data, profile_id)
+    if not entry or profile_id == DEFAULT:
+        raise ValueError('This profile cannot be discarded')
+    ids = {p['id'] for p in data['profiles']} - {profile_id}
+    back = entry.get('from') if entry.get('from') in ids else DEFAULT
+    data['next'] = back
+    data['last'] = back
+    data['discard'] = profile_id
+    save(data)
+    return back
+
+
+def _forget(data, profile_id):
+    data['profiles'] = [p for p in data['profiles'] if p['id'] != profile_id]
+    data['steam'] = {k: v for k, v in data['steam'].items() if v != profile_id}
+    if data.get('last') == profile_id:
+        data['last'] = DEFAULT
+    if data.get('next') == profile_id:
+        data.pop('next')
 
 
 def remove(profile_id):
@@ -454,11 +501,6 @@ def remove(profile_id):
     data = load()
     if not get(data, profile_id):
         raise ValueError('No such profile')
-    data['profiles'] = [p for p in data['profiles'] if p['id'] != profile_id]
-    data['steam'] = {k: v for k, v in data['steam'].items() if v != profile_id}
-    if data.get('last') == profile_id:
-        data['last'] = DEFAULT
-    if data.get('next') == profile_id:
-        data.pop('next')
+    _forget(data, profile_id)
     save(data)
     shutil.rmtree(paths.profile_dir(profile_id), ignore_errors=True)

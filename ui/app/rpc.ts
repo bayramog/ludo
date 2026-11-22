@@ -99,6 +99,7 @@ export const getAvatar = callable<[], any>("get_avatar");
 export const getProfiles = callable<[], any>("get_profiles");
 export const switchProfile = callable<[string], any>("switch_profile");
 export const createProfile = callable<[string], any>("create_profile");
+export const discardProfile = callable<[], any>("discard_profile");
 export const renameProfile = callable<[string, string], any>("rename_profile");
 export const removeProfile = callable<[string], any>("remove_profile");
 export const linkProfileSteam = callable<[string, string], any>("link_profile_steam");

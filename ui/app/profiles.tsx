@@ -15,7 +15,7 @@ import { _forceGamepadFocus } from "./shell";
 import { holdToasts, toaster } from "./toast";
 import { dropProfileStorage, storageProfile, swapProfileStorage } from "./storage";
 import {
-  createProfile, getProfiles, linkProfileSteam, removeProfile, renameProfile, switchProfile, unlinkProfileSteam,
+  createProfile, discardProfile, getProfiles, linkProfileSteam, removeProfile, renameProfile, switchProfile, unlinkProfileSteam,
 } from "./rpc";
 
 export type Profile = {
@@ -80,6 +80,18 @@ export async function openProfile(id: string): Promise<boolean> {
   }
   if (r?.status === 'error') toaster.toast({ urgent: true, title: 'Could not switch profile', body: r.message || '' });
   return false;
+}
+
+// Back out of a just-added profile from its welcome screen: the profile it
+// was added from opens again and this unfinished one is deleted.
+export async function discardNewProfile(): Promise<void> {
+  const r = await discardProfile();
+  if (r?.status === 'reload' && r.id) {
+    swapProfileStorage(r.id);
+    host.app.reloadBackend();
+  } else {
+    toaster.toast({ urgent: true, title: 'Could not go back', body: r?.message || '' });
+  }
 }
 
 // The account menu's "Switch profile" row, with the other profiles' faces.

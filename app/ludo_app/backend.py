@@ -4716,6 +4716,21 @@ class LudoBackend:
         result['id'] = pid
         return result
 
+    async def discard_profile(self):
+        """Back out of the profile in use while it is still signed out: reopen
+        the one it was added from; this one is deleted when the backend restarts."""
+        if _profiles.launch is None:
+            return {'status': 'unsupported'}
+        entry = _profiles.get(_profiles.load(), _paths.profile_id()) or {}
+        if entry.get('username'):
+            return {'status': 'error', 'message': 'This profile is signed in'}
+        try:
+            back = _profiles.discard(_paths.profile_id())
+        except ValueError as e:
+            return {'status': 'error', 'message': str(e)}
+        _profiles.launch['ask'] = False
+        return {'status': 'reload', 'id': back}
+
     async def rename_profile(self, profile_id, name):
         if _profiles.launch is None:
             return {'status': 'unsupported'}
