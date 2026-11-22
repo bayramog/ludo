@@ -24,8 +24,10 @@ def backend(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     b = LudoBackend(host=DESKTOP)
     b._settings = type("S", (), {"get": lambda self, *a: 'dev'})()
-    ps = PlaySessions(tmp_path / 'ps.json', lambda: None, lambda: 'dev', clock=lambda: 10**9)
+    ps = PlaySessions(tmp_path / 'ps.json', lambda: None, lambda: 'dev', clock=lambda: 1_700_100_000)
     for rom, start, secs in ((PARENT, 1000, 600), (VARIANT, 5000, 1200), (OTHER, 9000, 300)):
+        # Keep fixtures away from pre-epoch local time on Windows runners.
+        start += 1_700_000_000
         ps.store.add_local(rom, start, start + secs, secs * 1000, 'dev')
     b._auto_sync = type("A", (), {"play_sessions": ps})()
     b._available_games = [

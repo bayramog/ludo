@@ -1,8 +1,11 @@
 """Execution contracts, using actual child processes and synthetic fixture repos."""
 import json
+import io
 import os
 from pathlib import Path
 import subprocess
+import shlex
+import shutil
 import sys
 import tempfile
 import unittest
@@ -65,6 +68,16 @@ print('ok isolated')
         self.assertEqual(result['status'], 'passed')
         self.assertEqual(result['evidence']['ok_lines'], 1)
 
+    def test_failure_diagnostics_survive_legacy_windows_console_encoding(self):
+        buffer = io.BytesIO()
+        console = io.TextIOWrapper(buffer, encoding='cp1252')
+        with patch('sys.stdout', console):
+            result = self.child("print('game \U0001f3ae')\nraise SystemExit(1)")
+        console.flush()
+        self.assertIn('game \U0001f3ae', buffer.getvalue().decode('utf-8'))
+        self.assertEqual(result['failure'], 'test_failure')
+        console.detach()
+
     def test_windows_crlf_completion_marker(self):
         result = self.child("import sys\nsys.stdout.buffer.write(b'all independent Switch key sync checks passed\\r\\n')")
         self.assertEqual(result['status'], 'passed')
@@ -103,7 +116,9 @@ unittest.main()
 
     def test_unclassified_and_missing_files_fail(self):
         manifest = self.inventory()
-        extra = self.root / 'engine/tests/test_new.py'
+        nested = self.root / 'engine/tests/nested'
+        nested.mkdir()
+        extra = nested / 'test_new.py'
         extra.touch()
         with self.assertRaisesRegex(ValueError, 'unclassified=.*test_new'):
             select_tests('engine', root=self.root, manifest=manifest)
@@ -145,6 +160,19 @@ unittest.main()
                     junit.write_text(xml)
                 self.assertEqual(self.child('pass', kind='app', junit=junit)['failure'], expected)
 
+    def test_backend_failure_artifact_keeps_identity_but_omits_parameters_and_messages(self):
+        junit = self.root / 'failure.xml'
+        junit.write_text('<testsuite tests="1" failures="1"><testcase classname="tests.test_fixture" '
+                         'name="test_auth[secret-fixture-value]"><failure>secret-fixture-value</failure>'
+                         '</testcase></testsuite>')
+        result = self.child('pass', kind='app', junit=junit)
+        self.assertEqual(result['failure'], 'test_failure')
+        self.assertEqual(result['failed_tests'], [{'test': 'test_auth',
+                         'module': 'tests.test_fixture', 'outcome': 'failure'}])
+        destination = self.root / 'evidence'
+        save_report(result, destination)
+        self.assertNotIn('secret-fixture-value', (destination / 'summary.json').read_text())
+
     def test_failure_artifact_is_bounded_and_does_not_contain_output_or_secrets(self):
         marker = 'sensitive-fixture-value-DO-NOT-UPLOAD'
         # Mock only printing to keep this negative test's console concise; the
@@ -163,6 +191,41 @@ unittest.main()
         self.assertEqual(list(destination.iterdir()), [destination / 'summary.json'])
         with self.assertRaises(FileExistsError):
             save_report(report, destination)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX Bash bootstrap only; Windows installs deps explicitly (#11)')
+    def test_bash_reuses_existing_venv_offline_when_path_python_lacks_deps(self):
+        engine = self.root / 'engine'
+        tests = engine / 'tests'
+        tests.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'engine/tests/run.sh', tests / 'run.sh')
+        (tests / 'run.py').write_text("import sys\nprint('offline fixture', sys.argv[1:])")
+        fake_path = self.root / 'bin'
+        fake_path.mkdir()
+        for name in ('python', 'python3'):
+            stub = fake_path / name
+            stub.write_text('#!/bin/sh\nexit 1\n')
+            stub.chmod(0o755)
+        venv = engine / '.venv-tests' / 'bin'
+        venv.mkdir(parents=True)
+        python = venv / 'python'
+        python.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n')
+        python.chmod(0o755)
+        env = dict(os.environ, PATH=str(fake_path) + os.pathsep + os.environ['PATH'])
+        env.pop('LUDO_TEST_PYTHON', None)
+        p = subprocess.run(['bash', str(tests / 'run.sh'), 'keys', 'eden'], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("offline fixture ['keys', 'eden']", p.stdout)
+        self.assertNotIn('building', p.stderr)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX Bash bootstrap only; Windows invokes its selected Python (#11)')
+    def test_bash_invalid_explicit_interpreter_does_not_install_or_fall_back(self):
+        env = dict(os.environ, LUDO_TEST_PYTHON=str(self.root / 'missing-python'))
+        p = subprocess.run(['bash', str(ROOT / 'engine/tests/run.sh'), 'keys'], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('missing the engine', p.stderr)
+        self.assertNotIn('building', p.stderr)
 
     @unittest.skipIf(os.name == 'nt', 'POSIX Bash adapter only; Windows uses run.py (F1-06/#11)')
     def test_bash_explicit_python_and_filter_work_without_dependency_install(self):

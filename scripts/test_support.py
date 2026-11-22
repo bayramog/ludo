@@ -82,7 +82,7 @@ def engine_evidence(output):
         'ok_lines': len(re.findall(r'^ok(?:\s|$)', output, re.M)),
         'completion_markers': len(re.findall(
             r'^all independent Switch key sync checks passed$', output, re.M)),
-        'skipped': sum(map(int, re.findall(r'OK \(skipped=(\d+)\)', output))),
+        'skipped': sum(map(int, re.findall(r'OK \([^\n]*skipped=(\d+)', output))),
     }
 
 
@@ -102,7 +102,16 @@ def scan_engine_output(stream):
     return counts, explicit_failure
 
 
+def configure_output():
+    # Hosted Windows pipes can default to a legacy code page even though the
+    # child ran in UTF-8. Diagnostics must not abort the remainder of the suite.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+
+
 def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None):
+    configure_output()
     start = time.monotonic()
     result = {'status': 'failed', 'exit_code': None, 'failure': None}
     with tempfile.TemporaryFile() as stream:
@@ -126,12 +135,26 @@ def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None):
         skipped = evidence['skipped']
     else:
         evidence = {'tests': 0, 'failures': 0, 'errors': 0, 'skipped': 0}
+        result['failed_tests'] = []
         try:
             tree = ET.parse(junit).getroot()
             suites = [tree] if tree.tag == 'testsuite' else list(tree.iter('testsuite'))
             for suite in suites:
                 for key in evidence:
                     evidence[key] += int(suite.get(key, '0'))
+            for case in tree.iter('testcase'):
+                outcome = next((tag for tag in ('failure', 'error', 'skipped')
+                                if case.find(tag) is not None), None)
+                if outcome and len(result['failed_tests']) < 30:
+                    # Parameter IDs and failure bodies may contain fixture
+                    # credentials. Keep only Python identifiers, never values.
+                    name = case.get('name', '').split('[', 1)[0]
+                    module = case.get('classname', '')
+                    identifier = r'[A-Za-z_][A-Za-z_0-9.]*'
+                    result['failed_tests'].append({
+                        'test': name if re.fullmatch(identifier, name) else 'unknown',
+                        'module': module if re.fullmatch(identifier, module) else 'unknown',
+                        'outcome': outcome})
         except (OSError, ET.ParseError, ValueError, TypeError):
             result['failure'] = result['failure'] or 'missing_test_report'
         meaningful = evidence['tests'] > 0
@@ -185,6 +208,7 @@ def save_report(report, destination):
 
 
 def run_suite(suite, patterns=(), native=False, report_dir=None, timeout=300):
+    configure_output()
     report = new_report(suite)
     print(f'{suite}: {report["os"]} {report["os_version"]}; Python {report["python"]}; '
           f'interpreter={sys.executable}; commit={report["commit"]}', flush=True)
