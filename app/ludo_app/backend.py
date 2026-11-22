@@ -4770,14 +4770,46 @@ class LudoBackend:
             return {'status': 'error', 'message': str(e)}
         return {'status': 'ok'}
 
-    async def remove_profile(self, profile_id, delete_saves=False):
+    async def remove_profile(self, profile_id, delete_saves=True):
+        """Remove a profile and everything it keeps on this machine. Its saves
+        are synced to RomM first, in a process of its own (the engine's paths
+        belong to the open profile), and nothing is deleted while any are left
+        unsynced. A profile that never signed in has nowhere to sync to, so its
+        saves go with it."""
         if _profiles.launch is None:
             return {'status': 'unsupported'}
+        if profile_id == _paths.profile_id() or not _profiles.valid_id(profile_id):
+            return {'status': 'error', 'message': 'That profile cannot be removed'}
+        if delete_saves and _profiles.local_save_count(profile_id):
+            result = await self._flush_profile_saves(profile_id)
+            if result.get('status') == 'ok' and result.get('pending'):
+                return {'status': 'unsynced', 'pending': result['pending']}
+            if result.get('status') not in ('ok', 'no-account'):
+                return {'status': 'offline', 'message': result.get('error', '')}
         try:
             _profiles.remove(profile_id, delete_saves=bool(delete_saves))
         except ValueError as e:
             return {'status': 'error', 'message': str(e)}
         return {'status': 'ok'}
+
+    async def _flush_profile_saves(self, profile_id, timeout=180):
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, '-m', 'ludo_app.flush_profile', profile_id, env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, err = await asyncio.wait_for(proc.communicate(), timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return {'status': 'error', 'error': 'timed out'}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
+        for line in (err or b'').decode(errors='replace').splitlines()[-40:]:
+            logging.info(f"[flush {profile_id}] {line}")
+        try:
+            return json.loads(out.decode().strip().splitlines()[-1])
+        except Exception:
+            return {'status': 'error', 'error': 'no result'}
 
     async def link_profile_steam(self, profile_id, account):
         if _profiles.launch is None:
