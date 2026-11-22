@@ -10949,7 +10949,8 @@ class RetroArchInterface:
             Path('/usr/lib64/libretro'),
             Path('/usr/local/lib/libretro'),
             Path('/usr/lib/x86_64-linux-gnu/libretro'),
-            
+            Path('/usr/lib/aarch64-linux-gnu/libretro'),
+
             # Steam installations
             Path.home() / '.steam/steam/steamapps/common/RetroArch/cores',
             Path.home() / '.local/share/Steam/steamapps/common/RetroArch/cores',

@@ -32,6 +32,7 @@ import ctypes
 import struct
 import logging
 import os
+import platform
 import re
 from pathlib import Path
 
@@ -175,6 +176,14 @@ class _Sigil:
         # already carry: the Decky zip vendors romm_sync_engine wholesale and
         # the desktop app imports the engine from the tree. See bin/README.md.
         here = Path(__file__).resolve().parent
+        # Non-x86 builds sit in a per-arch subdirectory; bin/libsigil.so is the
+        # x86-64 one. A wrong-arch library fails CDLL with OSError, so trying
+        # both is safe: an aarch64 machine without its own build falls through
+        # to filename-only identification, exactly as with no library at all.
+        machine = platform.machine().lower()
+        machine = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(machine, machine)
+        if machine != 'x86_64':
+            candidates.append(str(here / 'bin' / machine / 'libsigil.so'))
         candidates.append(str(here / 'bin' / 'libsigil.so'))
         # A local build, for developing against a newer Sigil than the bundled
         # one, and the conventional manual install location. Both lose to
