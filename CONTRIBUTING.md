@@ -63,17 +63,21 @@ dependency.
 
 ```bash
 cd app     && pytest          # backend surface and the host-profile seam
-cd engine  && tests/run.sh    # the sync engine
+cd engine  && python tests/run.py  # or tests/run.sh for dependency bootstrap    # the sync engine
 cd desktop && npm test        # the host contract, and every route rendered
 ```
 
 Three things to know:
 
-- **The engine tests are not pytest.** Each file is a standalone script with its
-  own `check()` harness, so `pytest engine/tests/` collects nothing and exits 0 —
-  a green run that tested absolutely nothing. `tests/run.sh` is the supported way
-  in; it also builds `engine/.venv-tests` on demand if no interpreter on the
-  machine has the dependencies.
+- **The engine tests are not pytest.** Most files are standalone scripts with their
+  own `check()` harness; a few use unittest. Pytest collection does not exercise
+  the full engine suite. `python engine/tests/run.py` runs the actual scripts
+  with that interpreter, from the engine directory, in isolated user profiles.
+  It rejects empty selections, silent no-ops and unexpected unittest skips.
+  `tests/run.sh` keeps its interpreter selection and builds `engine/.venv-tests`
+  on demand only if no usable interpreter is available. Direct Python execution
+  never installs dependencies. See [the test coverage contract](docs/windows/TESTING.md)
+  for filters, platform exclusions and failure evidence.
 - **`routes.render.test.mjs` needs `npm run build` first.** It deliberately drives
   `dist/`, because `dist/` is what ships, and it skips itself loudly if Playwright
   or the build is missing.

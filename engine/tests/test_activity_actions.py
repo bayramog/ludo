@@ -3,6 +3,13 @@
 resolve_action marks the matching rows done so the row says what happened
 instead of offering the button again, and survives a reload from disk.
 """
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from romm_sync_engine import activity_log
 
 
@@ -35,3 +42,23 @@ def test_take_pending_removes_only_waiting_rows(tmp_path, monkeypatch):
     taken = activity_log.take_pending('enable_platform', platform='c64')
     assert [e['title'] for e in taken] == ['waiting']
     assert [e['title'] for e in activity_log.get_recent()] == ['other', 'old']
+
+
+class ActivityActionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+
+    def setattr(self, target, name, value):
+        patch.object(target, name, value).start()
+
+    def test_resolve(self):
+        test_resolve_marks_matching_rows_done(Path(self.temp.name), self)
+
+    def test_take_pending(self):
+        test_take_pending_removes_only_waiting_rows(Path(self.temp.name), self)
+
+
+if __name__ == '__main__':
+    unittest.main()
