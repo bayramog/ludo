@@ -36,3 +36,5 @@ jobs:
         run: python engine/tests/test_switch_mods_import.py
       - name: Backend install ownership and actual download shutdown
         run: python -m pytest -q app/tests/test_device_installs.py
+      - name: Backend replacement autosync and cancelled restarts
+        run: python -m pytest -q app/tests/test_autosync_restart.py

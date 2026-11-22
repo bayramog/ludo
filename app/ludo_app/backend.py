@@ -1041,6 +1041,7 @@ class LudoBackend:
         self._rpc_jobs_lock = threading.RLock()
         self._rpc_closed = False
         self._rpc_state_lock = threading.RLock()
+        self._auto_sync_handoff = None
         self._update_locks = {}
         try:
             from romm_sync_engine.sync_core import set_toasts_over_games
@@ -1191,6 +1192,8 @@ class LudoBackend:
         return self._settings
 
     def _start_sync(self):
+        if self._rpc_closed:
+            return
         if not SYNC_CORE_AVAILABLE:
             logging.error("sync_core not available, cannot start sync")
             return
@@ -1285,12 +1288,24 @@ class LudoBackend:
 
     def _detach_sync(self):
         """Detach loop-owned state now; return the potentially blocking teardown."""
-        if self._stop_event:
-            self._stop_event.set()
+        # Serialize cancellation with auto-sync admission: a retry either starts
+        # before detach (and is stopped below), or sees the cancelled generation.
+        with self._rpc_state_lock:
+            if self._stop_event:
+                self._stop_event.set()
+            auto = self._auto_sync
+            owner = getattr(auto, '_sync_ownership', None)
+            if owner is not None and not owner.done.is_set():
+                self._auto_sync_handoff = owner
+            # Preserve a pending local handoff across another replacement. A
+            # manager blocked at first launch never owned anything, so it must
+            # not turn ordinary external contention into a standing restart.
+            self._auto_sync = None
+            self._romm_client = None
         install_socket = getattr(self, '_install_socket', None)
         scan_socket = getattr(self, '_scan_socket', None)
         retry, reach = self._retry_thread, self._reach_thread
-        auto, collection = self._auto_sync, self._collection_sync
+        collection = self._collection_sync
         if install_socket:
             self._install_wake.set()
         self._reach_thread = None
@@ -1298,9 +1313,6 @@ class LudoBackend:
 
         self._retry_thread = None
         # Keep the signalled event readable by workers still leaving their loop.
-        with self._rpc_state_lock:
-            self._romm_client = None
-        self._auto_sync = None
         # Detached Switch firmware install: task handle plus the progress the
         # frontend polls while it runs.
         self._switch_fw_task = None
@@ -2392,55 +2404,60 @@ class LudoBackend:
 
                 self._init_bios_tracking()
 
-            # AutoSyncManager (save/state sync). Normally already built by
-            # _start_sync — the local state lookups Home does on the first frame
-            # need it long before connect gets here — so this is the fallback
-            # and the else branch below (attaching the client) is the live path.
-            if self._auto_sync is None:
-                self._auto_sync = AutoSyncManager(
-                    romm_client=self._romm_client,
-                    retroarch=self._retroarch,
-                    settings=self._settings,
-                    log_callback=lambda msg: logging.info(f"[AUTO-SYNC] {msg}"),
-                    get_games_callback=lambda: self._available_games,
-                    rom_removed_callback=self._on_rom_removed_from_server,
-                    parent_window=None,
-                )
-                self._auto_sync.start_play_watch()
-            else:
-                self._auto_sync.romm_client = self._romm_client
-            # A heartbeat told the device is gone registers it again.
-            self._auto_sync.play_sessions.on_device_missing = self._ensure_device_registered
+            with self._rpc_state_lock:
+                if (self._rpc_closed or self._stop_event is not stop_event
+                        or (stop_event is not None and stop_event.is_set())
+                        or self._romm_client is not client):
+                    return False
+                # AutoSyncManager (save/state sync). Normally already built by
+                # _start_sync — the local state lookups Home does on the first frame
+                # need it long before connect gets here — so this is the fallback
+                # and the else branch below (attaching the client) is the live path.
+                if self._auto_sync is None:
+                    self._auto_sync = AutoSyncManager(
+                        romm_client=self._romm_client,
+                        retroarch=self._retroarch,
+                        settings=self._settings,
+                        log_callback=lambda msg: logging.info(f"[AUTO-SYNC] {msg}"),
+                        get_games_callback=lambda: self._available_games,
+                        rom_removed_callback=self._on_rom_removed_from_server,
+                        parent_window=None,
+                    )
+                    self._auto_sync.start_play_watch()
+                else:
+                    self._auto_sync.romm_client = self._romm_client
+                # A heartbeat told the device is gone registers it again.
+                self._auto_sync.play_sessions.on_device_missing = self._ensure_device_registered
 
-            # Same hold as the library walk, for the same reason. The connect
-            # negotiate is bidirectional: it sends an empty local inventory and
-            # the server answers with download ops, which land in the saves dir
-            # whether or not the ROM is here — so a device that pairs into an
-            # account with save history pulls files during the wizard, for
-            # platforms the user may be about to switch off. (The negotiate
-            # honours no platform filter, but at least it can wait until setup
-            # is a decision rather than a screen in progress.)
-            if self._defer_library_fetch:
-                logging.info("Setup in progress — holding save auto-sync until setup ends")
-            elif os.environ.get('LUDO_DEV_READ_ONLY'):
-                logging.info("Read-only sandbox — save auto-sync stays off")
-            # Always on: Ludo has no switch for it. AutoSync/auto_enable_on_connect
-            # is RomM RetroArch Sync's, and a settings file carried over from it
-            # with that off left sync silently dead, with nothing in Ludo to undo it.
-            else:
-                self._auto_sync.upload_enabled   = True
-                self._auto_sync.download_enabled = True
-                try:
-                    upload_delay = int(self._settings.get('AutoSync', 'sync_delay', '3'))
-                except (ValueError, TypeError):
-                    upload_delay = 3
-                self._auto_sync.upload_delay = upload_delay
-                self._auto_sync.start_auto_sync()
-                logging.info("Auto-sync (saves/states) enabled")
-                # Collection sync runs in its own thread
-                threading.Thread(target=self._init_collection_sync,
-                                 daemon=True, name="romm-collection-init").start()
-
+                # Same hold as the library walk, for the same reason. The connect
+                # negotiate is bidirectional: it sends an empty local inventory and
+                # the server answers with download ops, which land in the saves dir
+                # whether or not the ROM is here — so a device that pairs into an
+                # account with save history pulls files during the wizard, for
+                # platforms the user may be about to switch off. (The negotiate
+                # honours no platform filter, but at least it can wait until setup
+                # is a decision rather than a screen in progress.)
+                if self._defer_library_fetch:
+                    logging.info("Setup in progress — holding save auto-sync until setup ends")
+                elif os.environ.get('LUDO_DEV_READ_ONLY'):
+                    logging.info("Read-only sandbox — save auto-sync stays off")
+                # Always on: Ludo has no switch for it. AutoSync/auto_enable_on_connect
+                # is RomM RetroArch Sync's, and a settings file carried over from it
+                # with that off left sync silently dead, with nothing in Ludo to undo it.
+                else:
+                    self._auto_sync.upload_enabled   = True
+                    self._auto_sync.download_enabled = True
+                    try:
+                        upload_delay = int(self._settings.get('AutoSync', 'sync_delay', '3'))
+                    except (ValueError, TypeError):
+                        upload_delay = 3
+                    self._auto_sync.upload_delay = upload_delay
+                    self._start_auto_sync_if_current(self._auto_sync, stop_event)
+                    if self._auto_sync.enabled:
+                        logging.info("Auto-sync (saves/states) enabled")
+                    # Collection sync runs in its own thread
+                    threading.Thread(target=self._init_collection_sync,
+                                     daemon=True, name="romm-collection-init").start()
             return True
 
         except Exception as e:
@@ -2537,6 +2554,20 @@ class LudoBackend:
         except Exception as e:
             logging.error(f"_fetch_disabled_counts error: {e}", exc_info=True)
 
+    def _start_auto_sync_if_current(self, manager, stop_event):
+        """Admit only the current, connected and still authorized sync manager."""
+        with self._rpc_state_lock:
+            if (self._rpc_closed or self._stop_event is not stop_event
+                    or (stop_event is not None and stop_event.is_set())
+                    or self._auto_sync is not manager
+                    or self._defer_library_fetch or os.environ.get('LUDO_DEV_READ_ONLY')
+                    or not self._romm_client or not self._romm_client.authenticated
+                    or manager.romm_client is not self._romm_client):
+                return
+            manager.start_auto_sync()
+            if manager.enabled:
+                self._auto_sync_handoff = None
+
     def _retry_loop(self, stop_event):
         """Connect on startup, then every 5 minutes refresh the collection list
         or retry the connection if disconnected. Uses updated_after for efficiency.
@@ -2580,10 +2611,28 @@ class LudoBackend:
                         and self._settings.get('UI', 'library_announced', '') != 'true'):
                     self._announce_library = {'kind': 'failed'}
 
+        next_refresh = time.monotonic() + 300
         while not stop_event.is_set():
-            stop_event.wait(300)  # sleep 5 minutes (or until _stop_sync wakes us)
+            manager = self._auto_sync
+            handoff = self._auto_sync_handoff
+            retry_sync = (manager is not None and not manager.enabled
+                          and manager.blocked_by_other_instance and handoff is not None)
+            delay = max(0, next_refresh - time.monotonic())
+            # A bounded stop may leave the previous manager draining. Retry its
+            # replacement locally without increasing the server polling rate.
+            stop_event.wait(min(1, delay) if retry_sync else delay)
             if stop_event.is_set():
                 break
+            if retry_sync and handoff.done.is_set():
+                try:
+                    self._start_auto_sync_if_current(manager, stop_event)
+                except Exception:
+                    # A local lock/filesystem failure says nothing about RomM
+                    # reachability, and must not suppress a due server refresh.
+                    logging.error("Auto-sync handoff retry failed", exc_info=True)
+            if time.monotonic() < next_refresh:
+                continue
+            next_refresh = time.monotonic() + 300
             try:
                 if self._romm_client and self._romm_client.authenticated:
                     # Use updated_after for efficient collection refresh if we have a timestamp
