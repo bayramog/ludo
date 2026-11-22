@@ -132,7 +132,7 @@ function ProfileCard({ profile, onPick, onManage, cardRef, index, chosen }:
   const [hot, setHot] = useState(false);
   return (
     <Focusable noFocusRing ref={cardRef} onActivate={onPick} onClick={onPick}
-      className={`pf-card${chosen ? ' pf-chosen' : ''}`}
+      className={`pf-card${chosen ? ' pf-chosen' : ''}`} data-pid={profile.id}
       onSecondaryButton={onManage} onSecondaryActionDescription="Manage"
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={(e: any) => _forceGamepadFocus(e.currentTarget)}
@@ -299,7 +299,14 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
       }
     } finally { setBusy(false); }
   };
-  const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} />);
+  // Back from Manage, focus returns to the card it was opened on (or the one
+  // in use, if that profile was just removed): by itself it only came back for
+  // the pad, so a mouse user returned to a picker with nothing selected.
+  const refocus = (id: string) => setTimeout(() => {
+    const card = rowRef.current?.querySelector<HTMLElement>(`[data-pid="${id}"]`) || currentRef.current;
+    if (card) _forceGamepadFocus(card);
+  }, 80);
+  const manage = (p: Profile) => showModal(<ProfileManageModal profile={p} accounts={list?.steam_accounts ?? []} profiles={profiles} onChanged={load} onPick={() => pick(p)} onClosed={() => refocus(p.id)} />);
 
   const profiles = list?.profiles ?? [];
   const body = (
@@ -328,9 +335,6 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
         <div onClick={close} style={{ position: 'absolute', inset: 0 }} />
         <div className="pf-rise" style={{ position: 'relative', textAlign: 'center' }}>
           <div style={{ fontSize: '26px', fontWeight: 800 }}>Who's playing?</div>
-          <div style={{ fontSize: '13px', color: V2.fgMuted, marginTop: '8px' }}>
-            Each profile has its own RomM account, saves and play history. Games stay shared.
-          </div>
         </div>
         <Focusable noFocusRing autoFocus ref={rowRef} flow-children="horizontal"
           style={{ position: 'relative', display: 'flex', gap: '18px', alignItems: 'stretch', flexWrap: 'wrap',
@@ -354,8 +358,9 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
 }
 
 // The Details-button menu on a profile card.
-function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, closeModal }:
-  { profile: Profile; accounts: SteamAccount[]; profiles: Profile[]; onChanged: () => void; onPick: () => void; closeModal?: () => void }) {
+function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, onClosed, closeModal }:
+  { profile: Profile; accounts: SteamAccount[]; profiles: Profile[]; onChanged: () => void; onPick: () => void; onClosed?: () => void; closeModal?: () => void }) {
+  useEffect(() => () => onClosed?.(), []);
   const panelRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(profile.custom_name ? profile.name : '');
