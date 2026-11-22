@@ -3,13 +3,13 @@ import { finishOnboarding, getConfig, getProfiles, getRommLogo, getSteamTileStat
 import { FileSelectionType, Focusable, Navigation, host, openFilePicker, showModal, ModalRoot, GamepadButton } from "@ludo/host";
 import { toaster } from "../toast";
 import { V2 } from "../theme";
-import { FaBoxOpen, FaCheck, FaCheckCircle, FaChevronLeft, FaChevronRight, FaDownload, FaExternalLinkAlt, FaGamepad, FaPlay, FaPuzzlePiece, FaSave, FaSync, FaTimes, FaUndo, FaUsers} from "react-icons/fa";
+import { FaBoxOpen, FaCheck, FaCheckCircle, FaChevronLeft, FaChevronRight, FaDownload, FaExternalLinkAlt, FaGamepad, FaPlay, FaPuzzlePiece, FaSave, FaSync, FaTimes, FaUndo} from "react-icons/fa";
 import { libNavigate } from "../nav";
 import { Bumper, GameActionButton, PairCodeField, V2Segment, V2SettingsRow, V2SettingsSection, V2Switch, V2TextField, UserMenuRow, MODAL_SCRIM_INSET, ScrollFade, V2CardRow} from "../kit";
 import { _forceGamepadFocus, playSteamSound, useAutoFocus } from "../shell";
 import { V2Bg } from "../media";
 import { V2_FOCUS_STYLE } from "../focus";
-import { ProfilePickerModal } from "../profiles";
+import { discardNewProfile } from "../profiles";
 import { QrCode, pickerStart, useQrPairing } from "../pairing";
 import { EmuStalePath, InstallProgressBar, PlatformSyncList, installSize, loadEmulatorStatus, publishEmulatorStatus, startEmulatorInstall, useEmulatorInstall, useEmulatorStatus, usePlatformSync, setWizardOpen} from "../emulator";
 // First run: welcome, connect, folders, done.
@@ -785,6 +785,7 @@ export function SetupWizard() {
         .wiz-dot--active { animation: wizDot 0.32s ease; }
       `}</style>
       <Focusable noFocusRing
+        onCancelButton={() => { if (cur === 'welcome' && otherProfiles) discardNewProfile(); }}
         // L1/R1 flip the login ↔ pair mode on the Connect step (mirrors the
         // home page's bumper tab paging; the keycaps flank the segment pill).
         onButtonDown={(evt: any) => {
@@ -822,11 +823,11 @@ export function SetupWizard() {
               </div>
               <div style={{ marginTop: '8px', display: 'flex', gap: '10px' }}>
                 <GameActionButton variant="emphasized" label="Get started" focusRef={startFocusRef} icon={<FaPlay size={13} style={{ marginLeft: '2px' }} />} onClick={next} />
-                {/* A new profile starts here, signed out: without this there is
-                    no way back to the others short of signing it in. */}
+                {/* A new profile starts here, signed out: Back drops it and
+                    returns to the profile it was added from. */}
                 {otherProfiles && (
-                  <GameActionButton label="Switch profile" icon={<FaUsers size={13} />}
-                    onClick={() => showModal(<ProfilePickerModal />)} />
+                  <GameActionButton label="Back" icon={<FaChevronLeft size={13} />}
+                    onClick={() => discardNewProfile()} />
                 )}
               </div>
             </div>
