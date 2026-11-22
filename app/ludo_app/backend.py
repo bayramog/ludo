@@ -5247,7 +5247,29 @@ class LudoBackend:
                       or [e for e in exts if e in _AMBIGUOUS_GAME_EXTS])
         return len(launchable) > 1
 
-    def _maybe_unzip_download(self, dest: Path, rom_id: int = None) -> Path:
+    def _download_slug(self, rom_id, platform_slug=None):
+        """The platform slug for a download, even when rom_id is a variant.
+
+        The library index is grouped, so a regional sibling's rom_id is not a
+        key in it; looking only there left arcade romsets with no slug and they
+        were unpacked like any multi-file zip (#98).
+        """
+        if platform_slug:
+            return platform_slug
+        index = self._games_index()
+        game = index.get(rom_id)
+        if game is None:
+            game = index.get(self._variant_parent_index().get(rom_id))
+        return (game or {}).get('platform_slug')
+
+    def _archive_stays_zipped(self, archive: Path, platform_slug) -> bool:
+        """True when this archive is launched as-is rather than unpacked."""
+        if arcade_romset_stays_zipped(platform_slug, _archive_member_names(archive)):
+            return True
+        return not self._archive_needs_extract(archive)
+
+    def _maybe_unzip_download(self, dest: Path, rom_id: int = None,
+                              platform_slug: str = None) -> Path:
         """Extract a freshly-downloaded archive when its content needs it.
 
         A .zip/.7z whose members require extraction (disc image / multi-file —
@@ -5271,10 +5293,8 @@ class LudoBackend:
                     return unpacked
             if not dest.is_file() or dest.suffix.lower() not in ('.zip', '.7z'):
                 return dest
-            slug = (self._games_index().get(rom_id) or {}).get('platform_slug')
-            if arcade_romset_stays_zipped(slug, _archive_member_names(dest)):
-                return dest
-            if not self._archive_needs_extract(dest):
+            if self._archive_stays_zipped(
+                    dest, self._download_slug(rom_id, platform_slug)):
                 return dest
             # Surface an "Extracting… N%" state so the UI doesn't sit at a silent
             # 100% while a large disc archive unpacks (can take many seconds). The
@@ -8467,10 +8487,12 @@ class LudoBackend:
                     return str(sibling), None
             loop = asyncio.get_event_loop()
             unpacked = await loop.run_in_executor(
-                None, self._maybe_unzip_download, archive, g.get('rom_id'))
+                None, self._maybe_unzip_download, archive, g.get('rom_id'),
+                g.get('platform_slug'))
             self._download_progress.pop(g.get('rom_id'), None)
             if Path(unpacked) == archive:
-                if self._archive_needs_extract(archive):
+                # An arcade romset is meant to stay zipped (#99).
+                if not self._archive_stays_zipped(archive, g.get('platform_slug')):
                     return None, f"Could not unpack {archive.name}."
                 return launch_path, None
             if Path(g.get('local_path') or '') == archive:
@@ -11054,7 +11076,7 @@ class LudoBackend:
                     self._download_cancels.discard(rom_id)
                     # grout-style: unpack a single-file .zip/.7z on arrival so
                     # disc cores get a real .cue/.m3u (no-op if disabled/plain ROM).
-                    final = self._maybe_unzip_download(dest, rom_id) if ok else dest
+                    final = self._maybe_unzip_download(dest, rom_id, platform_slug) if ok else dest
                     if ok:
                         final = self._maybe_decompress_switch(final, rom_id)
                     # Switch add-on content is the one thing here that is not
