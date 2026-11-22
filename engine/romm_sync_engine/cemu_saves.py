@@ -38,7 +38,6 @@ import shutil
 import struct
 import tempfile
 import time
-import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,14 +103,32 @@ def installs(executable=None):
 
 
 def _settings_value(settings_file, path):
+    """The text at ``path`` (nested tag names) in Cemu's settings.xml.
+
+    Decky's Python ships without xml.etree, and importing it at the top of
+    this module took the whole sync engine down on the Deck; there the tags
+    are read with a regex instead, which is plenty for Cemu's flat file."""
     try:
-        node = ET.parse(settings_file).getroot()
-    except (OSError, ET.ParseError):
+        text = Path(settings_file).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return None
+    try:
+        import xml.etree.ElementTree as ET
+    except ImportError:
+        for name in path:
+            m = re.search(rf'<{re.escape(name)}(?:\s[^>]*)?>(.*?)</{re.escape(name)}>', text, re.S)
+            if not m:
+                return None
+            text = m.group(1)
+        return text.strip() or None
+    try:
+        node = ET.fromstring(text)
+    except ET.ParseError:
         return None
     for name in path:
         node = node.find(name) if node is not None else None
-    text = (node.text or '').strip() if node is not None else ''
-    return text or None
+    value = (node.text or '').strip() if node is not None else ''
+    return value or None
 
 
 # ── Accounts ────────────────────────────────────────────────────────────────
