@@ -2452,7 +2452,13 @@ class LudoBackend:
                     except (ValueError, TypeError):
                         upload_delay = 3
                     self._auto_sync.upload_delay = upload_delay
-                    self._start_auto_sync_if_current(self._auto_sync, stop_event)
+                    try:
+                        self._start_auto_sync_if_current(self._auto_sync, stop_event)
+                    except Exception:
+                        # A local lock/filesystem failure is not a RomM
+                        # connection failure: the library is loaded, so don't
+                        # report this connect as failed and set off retries.
+                        logging.error("Auto-sync could not start", exc_info=True)
                     if self._auto_sync.enabled:
                         logging.info("Auto-sync (saves/states) enabled")
                     # Collection sync runs in its own thread
