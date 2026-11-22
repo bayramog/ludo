@@ -73,7 +73,7 @@ Three things to know:
   own `check()` harness; a few use unittest. Pytest collection does not exercise
   the full engine suite. `python engine/tests/run.py` runs the actual scripts
   with that interpreter, from the engine directory, in isolated user profiles.
-  It rejects empty selections, silent no-ops and unexpected unittest skips.
+  It rejects empty selections, silent no-ops and unexpected skips.
   `tests/run.sh` keeps its interpreter selection and builds `engine/.venv-tests`
   on demand only if no usable interpreter is available. Direct Python execution
   never installs dependencies. See [the test coverage contract](docs/windows/TESTING.md)

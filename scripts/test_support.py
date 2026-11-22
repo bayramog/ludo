@@ -82,7 +82,8 @@ def engine_evidence(output):
         'ok_lines': len(re.findall(r'^ok(?:\s|$)', output, re.M)),
         'completion_markers': len(re.findall(
             r'^all independent Switch key sync checks passed$', output, re.M)),
-        'skipped': sum(map(int, re.findall(r'OK \([^\n]*skipped=(\d+)', output))),
+        'skipped': (sum(map(int, re.findall(r'OK \([^\n]*skipped=(\d+)', output)))
+                    + len(re.findall(r'^(?:skip|SKIP)(?:\s|$)', output, re.M))),
     }
 
 
@@ -209,6 +210,10 @@ def save_report(report, destination):
 
 def run_suite(suite, patterns=(), native=False, report_dir=None, timeout=300):
     configure_output()
+    if report_dir is not None and Path(report_dir).exists():
+        print('Configuration error: report directory already exists; choose a new directory',
+              file=sys.stderr)
+        return 2
     report = new_report(suite)
     report['selection_mode'] = 'native' if native else 'all'
     print(f'{suite}: {report["os"]} {report["os_version"]}; Python {report["python"]}; '

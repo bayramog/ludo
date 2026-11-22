@@ -105,6 +105,22 @@ print('ok isolated')
         result = self.child('import time\ntime.sleep(10)', timeout=0.1)
         self.assertEqual(result['failure'], 'timeout')
 
+    def test_script_skip_cannot_be_hidden_by_passing_checks(self):
+        result = self.child("print('ok first check')\nprint('skip  .7z case: no binary')")
+        self.assertEqual(result['failure'], 'unexpected_skip')
+        self.assertEqual(result['evidence']['skipped'], 1)
+
+    def test_existing_report_directory_is_rejected_before_running_tests(self):
+        report = self.root / 'report'
+        report.mkdir()
+        (report / 'sentinel').write_text('keep')
+        p = subprocess.run([sys.executable, str(ROOT / 'engine/tests/run.py'),
+                            'activity_actions', '--report-dir', str(report)],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2)
+        self.assertNotIn('Selected', p.stdout)
+        self.assertEqual(list(report.iterdir()), [report / 'sentinel'])
+
     def test_unittest_skip_cannot_be_green(self):
         result = self.child('''import unittest
 class Tests(unittest.TestCase):

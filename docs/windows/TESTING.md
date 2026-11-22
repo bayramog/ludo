@@ -31,7 +31,8 @@ exit 2, child/test/zero-test/skip failures exit 1, all selected files passing ex
 work under the standalone runner. Its unittest entrypoint now executes both
 contracts. Existing engine `ok` lines, unittest cases and completion markers are
 reported separately: they are not interchangeable assertion counts. A silent
-zero-exit script fails. Backend runs real pytest, parses its private JUnit
+zero-exit script fails. Standalone `skip`/`SKIP` lines also fail the gate (including a missing 7z binary
+in the Linux Cemu fixture). Backend runs real pytest, parses its private JUnit
 counts and rejects zero tests or unexpected skips.
 
 ## Platform accounting
@@ -51,7 +52,7 @@ typecheck. These browser tests are Linux-hosted; Windows packaged UI acceptance
 remains in [F5-04](https://github.com/bayramog/ludo/issues/243).
 
 The runner's three Bash compatibility/bootstrap tests are POSIX-only and
-visibly skipped on Windows: Windows invokes Python directly. Its other eighteen
+visibly skipped on Windows: Windows invokes Python directly. Its other twenty
 negative/execution contracts execute on both OSes. Tracking: [F1-06](https://github.com/bayramog/ludo/issues/11).
 
 ## Isolation and failure evidence
