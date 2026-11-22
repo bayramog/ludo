@@ -32,6 +32,7 @@ import datetime
 import psutil
 import stat
 import re
+import shlex
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -8074,7 +8075,7 @@ class RetroArchInterface:
             ]
             
             for cmd in commands_to_try:
-                print(f"🎮 Trying RetroDECK command: {' '.join(cmd)}")
+                print(f"🎮 Trying RetroDECK command: {shlex.join(cmd)}")
 
                 result = subprocess.Popen(cmd,
                                         stdout=subprocess.PIPE,
@@ -10159,7 +10160,7 @@ class RetroArchInterface:
         try:
             import subprocess
 
-            logging.debug(f"Launching: {' '.join(cmd)}")
+            logging.debug(f"Launching: {shlex.join(cmd)}")
             logging.debug(f"ROM path exists: {os.path.exists(rom_path)}")
 
             # Launch RetroArch with debugging (don't capture output to see what happens)
@@ -10191,7 +10192,7 @@ class RetroArchInterface:
                 stdout, stderr = result.communicate()
                 error_msg = f"Launch failed immediately.\n"
                 error_msg += f"Exit code: {result.returncode}\n"
-                error_msg += f"Command: {' '.join(cmd)}\n"
+                error_msg += f"Command: {shlex.join(cmd)}\n"
                 if stdout:
                     error_msg += f"STDOUT: {stdout[:500]}\n"
                 if stderr:
@@ -10201,7 +10202,7 @@ class RetroArchInterface:
                     error_msg += "1. RetroArch/core path is incorrect\n"
                     error_msg += "2. Missing library dependencies\n"
                     error_msg += "3. Permission issues\n"
-                    error_msg += f"Try running manually: {' '.join(cmd)}"
+                    error_msg += f"Try running manually: {shlex.join(cmd)}"
                 logging.warning(error_msg)
                 return False, (f"The emulator closed straight away (exit code "
                                f"{result.returncode}). Files or BIOS it needs may "
