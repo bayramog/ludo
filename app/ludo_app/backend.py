@@ -27,9 +27,13 @@ import shutil
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin
+
+from romm_sync_engine.process_lock import ProcessLock
+from romm_sync_engine.owned_tasks import OwnedTasks
 
 from .host import HostProfile
 from .install_socket import InstallSocket, ScanSocket
@@ -57,6 +61,9 @@ def _default_roms_dir() -> str:
 
 
 CONFIG_DIR = _paths.config_dir()
+# Internal remote-install ownership follows asyncio.run into download_game,
+# but does not affect frontend RPC downloads or change their public signature.
+_install_owner = ContextVar('ludo_install_owner', default=None)
 
 # Import PIL early to ensure C extensions are loaded correctly
 # This must be done before sync_core imports it at module level
@@ -1034,6 +1041,7 @@ class LudoBackend:
         self._rpc_jobs_lock = threading.RLock()
         self._rpc_closed = False
         self._rpc_state_lock = threading.RLock()
+        self._auto_sync_handoff = None
         self._update_locks = {}
         try:
             from romm_sync_engine.sync_core import set_toasts_over_games
@@ -1184,6 +1192,8 @@ class LudoBackend:
         return self._settings
 
     def _start_sync(self):
+        if self._rpc_closed:
+            return
         if not SYNC_CORE_AVAILABLE:
             logging.error("sync_core not available, cannot start sync")
             return
@@ -1278,12 +1288,24 @@ class LudoBackend:
 
     def _detach_sync(self):
         """Detach loop-owned state now; return the potentially blocking teardown."""
-        if self._stop_event:
-            self._stop_event.set()
+        # Serialize cancellation with auto-sync admission: a retry either starts
+        # before detach (and is stopped below), or sees the cancelled generation.
+        with self._rpc_state_lock:
+            if self._stop_event:
+                self._stop_event.set()
+            auto = self._auto_sync
+            owner = getattr(auto, '_sync_ownership', None)
+            if owner is not None and not owner.done.is_set():
+                self._auto_sync_handoff = owner
+            # Preserve a pending local handoff across another replacement. A
+            # manager blocked at first launch never owned anything, so it must
+            # not turn ordinary external contention into a standing restart.
+            self._auto_sync = None
+            self._romm_client = None
         install_socket = getattr(self, '_install_socket', None)
         scan_socket = getattr(self, '_scan_socket', None)
         retry, reach = self._retry_thread, self._reach_thread
-        auto, collection = self._auto_sync, self._collection_sync
+        collection = self._collection_sync
         if install_socket:
             self._install_wake.set()
         self._reach_thread = None
@@ -1291,9 +1313,6 @@ class LudoBackend:
 
         self._retry_thread = None
         # Keep the signalled event readable by workers still leaving their loop.
-        with self._rpc_state_lock:
-            self._romm_client = None
-        self._auto_sync = None
         # Detached Switch firmware install: task handle plus the progress the
         # frontend polls while it runs.
         self._switch_fw_task = None
@@ -2385,55 +2404,66 @@ class LudoBackend:
 
                 self._init_bios_tracking()
 
-            # AutoSyncManager (save/state sync). Normally already built by
-            # _start_sync — the local state lookups Home does on the first frame
-            # need it long before connect gets here — so this is the fallback
-            # and the else branch below (attaching the client) is the live path.
-            if self._auto_sync is None:
-                self._auto_sync = AutoSyncManager(
-                    romm_client=self._romm_client,
-                    retroarch=self._retroarch,
-                    settings=self._settings,
-                    log_callback=lambda msg: logging.info(f"[AUTO-SYNC] {msg}"),
-                    get_games_callback=lambda: self._available_games,
-                    rom_removed_callback=self._on_rom_removed_from_server,
-                    parent_window=None,
-                )
-                self._auto_sync.start_play_watch()
-            else:
-                self._auto_sync.romm_client = self._romm_client
-            # A heartbeat told the device is gone registers it again.
-            self._auto_sync.play_sessions.on_device_missing = self._ensure_device_registered
+            with self._rpc_state_lock:
+                if (self._rpc_closed or self._stop_event is not stop_event
+                        or (stop_event is not None and stop_event.is_set())
+                        or self._romm_client is not client):
+                    return False
+                # AutoSyncManager (save/state sync). Normally already built by
+                # _start_sync — the local state lookups Home does on the first frame
+                # need it long before connect gets here — so this is the fallback
+                # and the else branch below (attaching the client) is the live path.
+                if self._auto_sync is None:
+                    self._auto_sync = AutoSyncManager(
+                        romm_client=self._romm_client,
+                        retroarch=self._retroarch,
+                        settings=self._settings,
+                        log_callback=lambda msg: logging.info(f"[AUTO-SYNC] {msg}"),
+                        get_games_callback=lambda: self._available_games,
+                        rom_removed_callback=self._on_rom_removed_from_server,
+                        parent_window=None,
+                    )
+                    self._auto_sync.start_play_watch()
+                else:
+                    self._auto_sync.romm_client = self._romm_client
+                # A heartbeat told the device is gone registers it again.
+                self._auto_sync.play_sessions.on_device_missing = self._ensure_device_registered
 
-            # Same hold as the library walk, for the same reason. The connect
-            # negotiate is bidirectional: it sends an empty local inventory and
-            # the server answers with download ops, which land in the saves dir
-            # whether or not the ROM is here — so a device that pairs into an
-            # account with save history pulls files during the wizard, for
-            # platforms the user may be about to switch off. (The negotiate
-            # honours no platform filter, but at least it can wait until setup
-            # is a decision rather than a screen in progress.)
-            if self._defer_library_fetch:
-                logging.info("Setup in progress — holding save auto-sync until setup ends")
-            elif os.environ.get('LUDO_DEV_READ_ONLY'):
-                logging.info("Read-only sandbox — save auto-sync stays off")
-            # Always on: Ludo has no switch for it. AutoSync/auto_enable_on_connect
-            # is RomM RetroArch Sync's, and a settings file carried over from it
-            # with that off left sync silently dead, with nothing in Ludo to undo it.
-            else:
-                self._auto_sync.upload_enabled   = True
-                self._auto_sync.download_enabled = True
-                try:
-                    upload_delay = int(self._settings.get('AutoSync', 'sync_delay', '3'))
-                except (ValueError, TypeError):
-                    upload_delay = 3
-                self._auto_sync.upload_delay = upload_delay
-                self._auto_sync.start_auto_sync()
-                logging.info("Auto-sync (saves/states) enabled")
-                # Collection sync runs in its own thread
-                threading.Thread(target=self._init_collection_sync,
-                                 daemon=True, name="romm-collection-init").start()
-
+                # Same hold as the library walk, for the same reason. The connect
+                # negotiate is bidirectional: it sends an empty local inventory and
+                # the server answers with download ops, which land in the saves dir
+                # whether or not the ROM is here — so a device that pairs into an
+                # account with save history pulls files during the wizard, for
+                # platforms the user may be about to switch off. (The negotiate
+                # honours no platform filter, but at least it can wait until setup
+                # is a decision rather than a screen in progress.)
+                if self._defer_library_fetch:
+                    logging.info("Setup in progress — holding save auto-sync until setup ends")
+                elif os.environ.get('LUDO_DEV_READ_ONLY'):
+                    logging.info("Read-only sandbox — save auto-sync stays off")
+                # Always on: Ludo has no switch for it. AutoSync/auto_enable_on_connect
+                # is RomM RetroArch Sync's, and a settings file carried over from it
+                # with that off left sync silently dead, with nothing in Ludo to undo it.
+                else:
+                    self._auto_sync.upload_enabled   = True
+                    self._auto_sync.download_enabled = True
+                    try:
+                        upload_delay = int(self._settings.get('AutoSync', 'sync_delay', '3'))
+                    except (ValueError, TypeError):
+                        upload_delay = 3
+                    self._auto_sync.upload_delay = upload_delay
+                    try:
+                        self._start_auto_sync_if_current(self._auto_sync, stop_event)
+                    except Exception:
+                        # A local lock/filesystem failure is not a RomM
+                        # connection failure: the library is loaded, so don't
+                        # report this connect as failed and set off retries.
+                        logging.error("Auto-sync could not start", exc_info=True)
+                    if self._auto_sync.enabled:
+                        logging.info("Auto-sync (saves/states) enabled")
+                    # Collection sync runs in its own thread
+                    threading.Thread(target=self._init_collection_sync,
+                                     daemon=True, name="romm-collection-init").start()
             return True
 
         except Exception as e:
@@ -2530,6 +2560,20 @@ class LudoBackend:
         except Exception as e:
             logging.error(f"_fetch_disabled_counts error: {e}", exc_info=True)
 
+    def _start_auto_sync_if_current(self, manager, stop_event):
+        """Admit only the current, connected and still authorized sync manager."""
+        with self._rpc_state_lock:
+            if (self._rpc_closed or self._stop_event is not stop_event
+                    or (stop_event is not None and stop_event.is_set())
+                    or self._auto_sync is not manager
+                    or self._defer_library_fetch or os.environ.get('LUDO_DEV_READ_ONLY')
+                    or not self._romm_client or not self._romm_client.authenticated
+                    or manager.romm_client is not self._romm_client):
+                return
+            manager.start_auto_sync()
+            if manager.enabled:
+                self._auto_sync_handoff = None
+
     def _retry_loop(self, stop_event):
         """Connect on startup, then every 5 minutes refresh the collection list
         or retry the connection if disconnected. Uses updated_after for efficiency.
@@ -2573,10 +2617,28 @@ class LudoBackend:
                         and self._settings.get('UI', 'library_announced', '') != 'true'):
                     self._announce_library = {'kind': 'failed'}
 
+        next_refresh = time.monotonic() + 300
         while not stop_event.is_set():
-            stop_event.wait(300)  # sleep 5 minutes (or until _stop_sync wakes us)
+            manager = self._auto_sync
+            handoff = self._auto_sync_handoff
+            retry_sync = (manager is not None and not manager.enabled
+                          and manager.blocked_by_other_instance and handoff is not None)
+            delay = max(0, next_refresh - time.monotonic())
+            # A bounded stop may leave the previous manager draining. Retry its
+            # replacement locally without increasing the server polling rate.
+            stop_event.wait(min(1, delay) if retry_sync else delay)
             if stop_event.is_set():
                 break
+            if retry_sync and handoff.done.is_set():
+                try:
+                    self._start_auto_sync_if_current(manager, stop_event)
+                except Exception:
+                    # A local lock/filesystem failure says nothing about RomM
+                    # reachability, and must not suppress a due server refresh.
+                    logging.error("Auto-sync handoff retry failed", exc_info=True)
+            if time.monotonic() < next_refresh:
+                continue
+            next_refresh = time.monotonic() + 300
             try:
                 if self._romm_client and self._romm_client.authenticated:
                     # Use updated_after for efficient collection refresh if we have a timestamp
@@ -6194,93 +6256,96 @@ class LudoBackend:
         active = set()        # request ids being handled now
         warned = set()        # reasons already logged, so a denial logs once
         lock = None           # held while this copy is the one handling installs
+        owner = None
         ready = False         # until connected, look again soon rather than in a minute
-        while not stop_event.is_set():
-            woken = wake.wait(self._INSTALL_POLL if ready else 5)
-            if stop_event.is_set():
-                break
-            if woken:
-                # Bursts (connect + queued) arrive together: claim once.
-                if stop_event.wait(0.5):
-                    break
-                wake.clear()
-            try:
-                client = self._romm_client
-                # Every copy listens for scans, paired or not, lock or no lock.
-                if client and client.authenticated and self._online is not False:
-                    scan_socket.ensure(client.base_url, client.client_token or '-',
-                                             client.session.verify)
-                else:
-                    scan_socket.close()
-                if not (client and client.authenticated and self._online is not False
-                        and client.server_features.get('device_install')):
-                    ready = False
-                    install_socket.close()
-                    continue
-                ready = True
-                # The desktop app and the Decky plugin share one config, so on a
-                # machine with both, two copies would claim the same requests
-                # and download the same ROM into the same file. One handles
-                # installs; the other stays out until it closes.
-                if lock is None:
-                    lock = self._take_install_lock()
-                    if lock is None:
-                        if 'locked' not in warned:
-                            warned.add('locked')
-                            logging.info("[INSTALL] another Ludo is handling installs")
-                        install_socket.close()
-                        continue
-                device_id = self._settings.get('Device', 'device_id', '')
-                if not device_id:
-                    continue
-                requests_, reason = client.claim_installs(device_id)
+        try:
+            while not stop_event.is_set():
+                woken = wake.wait(self._INSTALL_POLL if ready else 5)
                 if stop_event.is_set():
                     break
-                # The one denial the user can fix: offer to re-pair.
-                self._install_not_bound = (reason == 'not_bound')
-                # Only a token RomM will take for this device gets a socket.
-                if requests_ is None or not client.client_token:
-                    install_socket.close()
-                else:
-                    install_socket.ensure(client.base_url, client.client_token,
-                                                client.session.verify)
-                if requests_ is None:
-                    if reason not in warned:
-                        warned.add(reason)
-                        logging.info(f"[INSTALL] not claiming installs: {reason}"
-                                     + (" (this device's token is bound to another "
-                                        "device; pair again with the QR code to "
-                                        "receive installs)" if reason == 'not_bound' else ""))
-                    continue
-                for req in requests_:
-                    rid = req.get('id')
-                    if rid and rid not in active:
-                        active.add(rid)
-                        threading.Thread(
-                            target=self._handle_install, args=(req, device_id, active, stop_event, client),
-                            daemon=True, name=f"romm-install-{rid[:8]}").start()
-            except Exception as e:
-                logging.debug(f"install loop error: {e}")
+                if woken:
+                    # Bursts (connect + queued) arrive together: claim once.
+                    if stop_event.wait(0.5):
+                        break
+                    wake.clear()
+                try:
+                    client = self._romm_client
+                    # Every copy listens for scans, paired or not, lock or no lock.
+                    if client and client.authenticated and self._online is not False:
+                        scan_socket.ensure(client.base_url, client.client_token or '-',
+                                                 client.session.verify)
+                    else:
+                        scan_socket.close()
+                    if not (client and client.authenticated and self._online is not False
+                            and client.server_features.get('device_install')):
+                        ready = False
+                        install_socket.close()
+                        continue
+                    ready = True
+                    # The desktop app and the Decky plugin share one config, so on a
+                    # machine with both, two copies would claim the same requests
+                    # and download the same ROM into the same file. One handles
+                    # installs; the other stays out until it closes.
+                    if lock is None:
+                        lock = self._take_install_lock()
+                        if lock is None:
+                            if 'locked' not in warned:
+                                warned.add('locked')
+                                logging.info("[INSTALL] another Ludo is handling installs")
+                            install_socket.close()
+                            continue
+                        owner = OwnedTasks(lock)
+                    device_id = self._settings.get('Device', 'device_id', '')
+                    if not device_id:
+                        continue
+                    requests_, reason = client.claim_installs(device_id)
+                    if stop_event.is_set():
+                        break
+                    # The one denial the user can fix: offer to re-pair.
+                    self._install_not_bound = (reason == 'not_bound')
+                    # Only a token RomM will take for this device gets a socket.
+                    if requests_ is None or not client.client_token:
+                        install_socket.close()
+                    else:
+                        install_socket.ensure(client.base_url, client.client_token,
+                                                    client.session.verify)
+                    if requests_ is None:
+                        if reason not in warned:
+                            warned.add(reason)
+                            logging.info(f"[INSTALL] not claiming installs: {reason}"
+                                         + (" (this device's token is bound to another "
+                                            "device; pair again with the QR code to "
+                                            "receive installs)" if reason == 'not_bound' else ""))
+                        continue
+                    for req in requests_:
+                        rid = req.get('id')
+                        if rid and rid not in active:
+                            active.add(rid)
+                            owner.start(
+                                self._handle_owned_install,
+                                (owner, req, device_id, active, stop_event, client),
+                                name=f"romm-install-{rid[:8]}")
+                except Exception as e:
+                    logging.error(f"install loop error: {e}", exc_info=True)
+
+        finally:
+            if owner:
+                owner.close()
+            elif lock:
+                lock.release()
+
+    def _handle_owned_install(self, owner, *args):
+        token = _install_owner.set(owner)
+        try:
+            self._handle_install(*args)
+        finally:
+            _install_owner.reset(token)
 
     @staticmethod
     def _take_install_lock():
-        """An exclusive lock on installs.lock, or None if another process has it.
-        The open file is the lock: it is released when the process exits."""
-        import errno
-        import fcntl
-        # 'a', not 'w': a process that loses the race must not truncate the
-        # file the owner holds. Only contention means "another Ludo has it".
-        f = None
-        try:
-            f = open(CONFIG_DIR / 'installs.lock', 'a')
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return f
-        except OSError as e:
-            if f:
-                f.close()
-            if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
-                logging.warning(f"[INSTALL] install lock unavailable: {e}")
-            return None
+        """Return an owned lock, None for contention; propagate real I/O errors."""
+        lock = ProcessLock(CONFIG_DIR / 'installs.lock')
+        return lock if lock.acquire() else None
 
     def _handle_install(self, req, device_id, active, stop_event, client):
         """Download one requested ROM and report how it went."""
@@ -11262,7 +11327,12 @@ class LudoBackend:
                         'speed': 0, 'eta': 0, 'state': 'error', 'message': str(e),
                     }
 
-            threading.Thread(target=_worker, daemon=True, name=f"romm-dl-{rom_id}").start()
+            owner = _install_owner.get()
+            if owner is not None:
+                if owner.start(_worker, name=f"romm-dl-{rom_id}") is None:
+                    raise RuntimeError('Install ownership is stopping')
+            else:
+                threading.Thread(target=_worker, daemon=True, name=f"romm-dl-{rom_id}").start()
             return {'success': True, 'started': True, 'message': 'Download started'}
         except Exception as e:
             self._download_progress[rom_id] = {

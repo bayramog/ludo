@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from romm_sync_engine.sync_core import AutoSyncLock  # noqa: E402
+from romm_sync_engine.process_lock import ProcessLock  # noqa: E402
 
 FAILURES = []
 
@@ -27,8 +28,7 @@ def check(label, got, want):
 
 def lock_at(path):
     lk = AutoSyncLock.__new__(AutoSyncLock)
-    lk.lock_file = path
-    lk.lock_fd = None
+    ProcessLock.__init__(lk, path)
     return lk
 
 
