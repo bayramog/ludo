@@ -316,9 +316,22 @@ export function SetupWizard() {
   // Other profiles on this machine (desktop only): the welcome step offers a
   // way back to them.
   const [otherProfiles, setOtherProfiles] = useState(false);
+  const othersReq = useRef<Promise<boolean> | null>(null);
   useEffect(() => {
-    getProfiles().then((l: any) => setOtherProfiles(!!l?.supported && (l.profiles?.length ?? 0) > 1)).catch(() => {});
+    othersReq.current = getProfiles()
+      .then((l: any) => !!l?.supported && (l.profiles?.length ?? 0) > 1)
+      .catch(() => false);
+    othersReq.current.then(setOtherProfiles);
   }, []);
+  // Back to the profile this one was added from. B pressed before the profile
+  // list arrived used to do nothing, so it waits for the list instead; the
+  // wizard fades at once so the restart behind it doesn't read as a dead press.
+  const [leaving, setLeaving] = useState(false);
+  const goBack = async () => {
+    if (leaving || !(await othersReq.current)) return;
+    setLeaving(true);
+    if (!(await discardNewProfile())) setLeaving(false);
+  };
   // 'qr' leads because it is the only route that asks for nothing but the URL —
   // the other two still cost a trip through the on-screen keyboard, and both
   // stay available for servers too old for device auth (or users without a
@@ -785,7 +798,7 @@ export function SetupWizard() {
         .wiz-dot--active { animation: wizDot 0.32s ease; }
       `}</style>
       <Focusable noFocusRing
-        onCancelButton={() => { if (cur === 'welcome' && otherProfiles) discardNewProfile(); }}
+        onCancelButton={() => { if (cur === 'welcome') goBack(); }}
         // L1/R1 flip the login ↔ pair mode on the Connect step (mirrors the
         // home page's bumper tab paging; the keycaps flank the segment pill).
         onButtonDown={(evt: any) => {
@@ -801,6 +814,7 @@ export function SetupWizard() {
         }}
         style={{
           position: 'relative', zIndex: 2, width: '100%', maxWidth: '440px', margin: 'auto 0',
+          opacity: leaving ? 0 : 1, transition: 'opacity 0.18s ease',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', textAlign: 'center',
         }}>
         {/* Progress dots */}
@@ -827,7 +841,7 @@ export function SetupWizard() {
                     returns to the profile it was added from. */}
                 {otherProfiles && (
                   <GameActionButton label="Back" icon={<FaChevronLeft size={13} />}
-                    onClick={() => discardNewProfile()} />
+                    onClick={goBack} />
                 )}
               </div>
             </div>

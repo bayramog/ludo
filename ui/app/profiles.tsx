@@ -84,14 +84,15 @@ export async function openProfile(id: string): Promise<boolean> {
 
 // Back out of a just-added profile from its welcome screen: the profile it
 // was added from opens again and this unfinished one is deleted.
-export async function discardNewProfile(): Promise<void> {
-  const r = await discardProfile();
+export async function discardNewProfile(): Promise<boolean> {
+  const r = await discardProfile().catch((e: any) => ({ message: String(e?.message || e) }));
   if (r?.status === 'reload' && r.id) {
     swapProfileStorage(r.id);
     host.app.reloadBackend();
-  } else {
-    toaster.toast({ urgent: true, title: 'Could not go back', body: r?.message || '' });
+    return true;
   }
+  toaster.toast({ urgent: true, title: 'Could not go back', body: r?.message || '' });
+  return false;
 }
 
 // The account menu's "Switch profile" row, with the other profiles' faces.
@@ -306,7 +307,6 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
     try {
       const r = await createProfile('');
       if (r?.status === 'reload' && r.id) {
-        toaster.toast({ urgent: true, title: 'New profile', body: 'Sign in with its RomM account.' });
         swapProfileStorage(r.id);
         host.app.reloadBackend();
       } else {
