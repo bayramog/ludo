@@ -141,8 +141,12 @@ describe("profile picker, two profiles", { skip: SKIP }, () => {
       const r = await open();
       try {
         await r.page.focus(`[data-pid="${pid}"]`);
+        await r.page.waitForTimeout(300);
+        const lit = (sel) => r.page.$eval(sel, (e) => getComputedStyle(e).borderColor);
+        const focusedLook = await lit(`[data-pid="${pid}"]`);
         await r.pressPad(PAD.SECONDARY, { settleMs: 800 });
         assert.ok(await manageOpen(r.page), "Manage opened");
+        assert.equal(await lit(`[data-pid="${pid}"]`), focusedLook, "the card stays lit behind Manage");
         await r.pressPad(PAD.CANCEL, { settleMs: 800 });
         assert.equal(await manageOpen(r.page), false);
         assert.equal(await focusedPid(r.page), pid);
