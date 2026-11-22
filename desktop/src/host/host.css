@@ -20,7 +20,7 @@
 }
 
 :root {
-  --desk-bg: #1a1f24;
+  --desk-bg: #07070f;   /* = V2.bg: a reload shows this before the page paints */
   --desk-fg: #dcdedf;
   --desk-muted: #8b929a;
   --desk-accent: #1a9fff;

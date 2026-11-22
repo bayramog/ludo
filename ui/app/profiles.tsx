@@ -307,6 +307,8 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
     try {
       const r = await createProfile('');
       if (r?.status === 'reload' && r.id) {
+        // Fade out as a pick does; the restart behind it takes a moment.
+        setLeaving(true);
         swapProfileStorage(r.id);
         host.app.reloadBackend();
       } else {

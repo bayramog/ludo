@@ -350,7 +350,7 @@ function createWindow(url, fullscreen) {
     height: 800,
     title: "Ludo",
     icon: ICON,
-    backgroundColor: "#0b0e14",
+    backgroundColor: "#07070f",
     fullscreen,
     autoHideMenuBar: true,
     webPreferences: {

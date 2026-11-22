@@ -447,7 +447,7 @@ def _list_standalone_games(folder):
     return sorted(games, key=lambda x: x.name.lower())
 
 
-def _resolve_download_path(download_dir, platform_slug, file_name):
+def _resolve_download_path(download_dir, platform_slug, file_name, listing=None):
     """Return (local_path, is_downloaded) for a ROM, recognizing extractions.
 
     A single-file .zip/.7z download whose content needs it is unpacked into a
@@ -460,34 +460,61 @@ def _resolve_download_path(download_dir, platform_slug, file_name):
     Both folder names are searched: ROMs downloaded before the ES-DE folder
     mapping existed sit under the raw RomM slug (roms/dc), newer ones under the
     ES-DE name (roms/dreamcast), and a library is routinely a mix of the two.
+
+    `listing` (a _FolderListing) answers "is that name in the folder?" from one
+    listing per folder. A library-wide pass otherwise checks up to ~17 paths for
+    every game that isn't downloaded, which is most of them; with it, candidates
+    stay strings and only a name actually present costs a stat.
     """
     folders = platform_folder_candidates(platform_slug)
-    for folder in folders:
-        base = Path(download_dir) / folder / file_name
-        if is_path_validly_downloaded(base):
-            return base, True
-    # A compressed Switch download is decompressed on arrival (see
-    # Plugin._maybe_decompress_switch), so the file on disk is the .nsp/.xci.
-    converted = switch_nsz.converted_name(file_name)
-    if converted:
+    root = str(download_dir)
+
+    def names():
         for folder in folders:
-            cand = Path(download_dir) / folder / converted
-            if is_path_validly_downloaded(cand):
-                return cand, True
-    if Path(file_name).suffix.lower() in ('.zip', '.7z'):
-        stem = Path(file_name).stem
-        for folder in folders:
-            for cand in (Path(download_dir) / folder / stem,
-                         Path(download_dir) / folder / (stem + '__extracted')):
-                if is_path_validly_downloaded(cand):
-                    return cand, True
-            # Unpacked by hand, with the archive then deleted.
-            for ext in _DISC_IMAGE_EXTS:
-                cand = Path(download_dir) / folder / (stem + ext)
-                if is_path_validly_downloaded(cand):
-                    return cand, True
+            yield folder, file_name
+        # A compressed Switch download is decompressed on arrival (see
+        # Plugin._maybe_decompress_switch), so the file on disk is the .nsp/.xci.
+        converted = switch_nsz.converted_name(file_name)
+        if converted:
+            for folder in folders:
+                yield folder, converted
+        if os.path.splitext(file_name)[1].lower() in ('.zip', '.7z'):
+            stem = Path(file_name).stem
+            for folder in folders:
+                yield folder, stem
+                yield folder, stem + '__extracted'
+                # Unpacked by hand, with the archive then deleted.
+                for disc_ext in _DISC_IMAGE_EXTS:
+                    yield folder, stem + disc_ext
+
+    for folder, name in names():
+        folder_path = os.path.join(root, folder)
+        if listing is not None and not listing.has(folder_path, name):
+            continue
+        cand = Path(folder_path) / name
+        if is_path_validly_downloaded(cand):
+            return cand, True
     # Not downloaded — report where it *would* go, i.e. the ES-DE folder.
     return Path(download_dir) / folders[0] / file_name, False
+
+
+class _FolderListing:
+    """Names in each folder, read once per folder for a library-wide pass."""
+
+    def __init__(self):
+        self._names = {}
+
+    def has(self, folder, name):
+        if os.sep in name:   # a name with a subpath: let the stat decide
+            return True
+        names = self._names.get(folder)
+        if names is None:
+            try:
+                names = set(os.listdir(folder))
+            except OSError:
+                names = set()
+            self._names[folder] = names
+        return name in names
 
 
 def _detect_multi_disc(local_path, is_downloaded):
@@ -1900,6 +1927,7 @@ class LudoBackend:
             logging.warning(f"Can't resolve download dir, skipping reconcile: {e}")
             return
         found = 0
+        listing = _FolderListing()
         for g in (games or []):
             try:
                 platform_slug = (g.get('platform_slug')
@@ -1910,7 +1938,7 @@ class LudoBackend:
                 if not file_name:
                     continue
                 local_path, is_downloaded = _resolve_download_path(
-                    download_dir, platform_slug, file_name)
+                    download_dir, platform_slug, file_name, listing)
                 local_size = 0
                 if is_downloaded and local_path.exists():
                     if local_path.is_dir():
@@ -1935,7 +1963,7 @@ class LudoBackend:
                 for s in (g.get('_sibling_files') or []):
                     sid, fs = (s.get('id'), s.get('fs_name')) if isinstance(s, dict) else (None, None)
                     if sid and fs and sid not in variants:
-                        p, on_disk = _resolve_download_path(download_dir, platform_slug, fs)
+                        p, on_disk = _resolve_download_path(download_dir, platform_slug, fs, listing)
                         if on_disk:
                             variants[sid] = {'file_name': fs, 'local_path': str(p),
                                              'name': s.get('name')}
