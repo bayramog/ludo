@@ -172,6 +172,24 @@ class ProfilesTest(unittest.TestCase):
         self.assertEqual(data['steam'], {})
         self.assertEqual(self.launch(SteamAppUser='mia.plays')['id'], P.DEFAULT)
 
+    def test_remove_keeps_local_saves_unless_asked(self):
+        def with_saves(name):
+            pid = P.create(name)
+            d = P.save_dirs(pid)
+            (d['saves'] / 'gba').mkdir(parents=True)
+            (d['saves'] / 'gba' / 'a.srm').write_bytes(b'x')
+            d['states'].mkdir()
+            (d['states'] / 'a.state').write_bytes(b'y')
+            return pid, d['saves'].parent
+        self.launch()
+        kept, kept_root = with_saves('Mia')
+        gone, gone_root = with_saves('Leo')
+        self.assertEqual(P.local_save_count(kept), 2)
+        P.remove(kept)
+        self.assertTrue((kept_root / 'saves' / 'gba' / 'a.srm').exists())
+        P.remove(gone, delete_saves=True)
+        self.assertFalse(gone_root.exists())
+
     def test_discard_returns_to_the_profile_it_was_added_from(self):
         mia = P.create('Mia')
         new = P.create('', copy_from=mia)

@@ -491,9 +491,22 @@ def _forget(data, profile_id):
         data.pop('next')
 
 
-def remove(profile_id):
-    """Delete a profile's local state. Its saves on RomM are untouched; its
-    local save folders are kept, since they may hold progress not yet synced."""
+def local_save_count(profile_id):
+    """How many files are in a profile's own save and state folders."""
+    dirs = save_dirs(profile_id)
+    if not dirs:
+        return 0
+    n = 0
+    for d in (dirs['saves'], dirs['states']):
+        for _root, _dirs, files in os.walk(d):
+            n += len(files)
+    return n
+
+
+def remove(profile_id, delete_saves=False):
+    """Delete a profile's local state. Its saves on RomM are untouched. Its
+    local save folders are kept unless asked: they may hold progress not yet
+    synced, so that is the user's call (the confirm says so)."""
     if profile_id == DEFAULT:
         raise ValueError('The first profile cannot be removed')
     if profile_id == paths.profile_id():
@@ -504,3 +517,5 @@ def remove(profile_id):
     _forget(data, profile_id)
     save(data)
     shutil.rmtree(paths.profile_dir(profile_id), ignore_errors=True)
+    if delete_saves:
+        shutil.rmtree(save_dirs(profile_id)['saves'].parent, ignore_errors=True)

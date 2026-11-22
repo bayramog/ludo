@@ -20,7 +20,7 @@ import {
 
 export type Profile = {
   id: string; name: string; custom_name: boolean; username: string; role: string;
-  avatar: string | null; steam: string[]; signed_in: boolean; current: boolean; removable: boolean;
+  avatar: string | null; steam: string[]; signed_in: boolean; current: boolean; removable: boolean; local_saves?: number;
 };
 export type SteamAccount = { id: string; name: string; linked_to: string | null };
 export type ProfileList = {
@@ -457,12 +457,15 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
   const [name, setName] = useState(profile.custom_name ? profile.name : '');
   useEffect(() => { const t = setTimeout(() => { if (panelRef.current) _forceGamepadFocus(panelRef.current); }, 60); return () => clearTimeout(t); }, [renaming]);
   const done = () => { onChanged(); closeModal?.(); };
-  const remove = useArmedPress(async () => {
-    const r = await removeProfile(profile.id);
+  const removeWith = async (saves: boolean) => {
+    const r = await removeProfile(profile.id, saves);
     if (r?.status === 'ok') dropProfileStorage(profile.id);
     else toaster.toast({ urgent: true, title: 'Could not remove profile', body: r?.message || '' });
     done();
-  });
+  };
+  const remove = useArmedPress(() => removeWith(false));
+  const removeAll = useArmedPress(() => removeWith(true));
+  const saveCount = profile.local_saves ?? 0;
   const saveName = async () => {
     const r = await renameProfile(profile.id, name);
     if (r?.status !== 'ok') toaster.toast({ urgent: true, title: 'Could not rename profile', body: r?.message || '' });
@@ -544,8 +547,18 @@ function ProfileManageModal({ profile, accounts, profiles, onChanged, onPick, on
                   <UserMenuRow icon={<FaTrash size={14} />} danger armed={remove.armed}
                     label={remove.armed ? 'Press again to remove' : 'Remove profile'} onSelect={remove.press} />
                   <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '2px 12px 8px 39px', lineHeight: 1.4 }}>
-                    Its saves on RomM and its local save folder are kept.
+                    {saveCount ? 'Its saves on RomM and on this device are kept.' : 'Its saves on RomM are kept.'}
                   </div>
+                  {saveCount > 0 && (
+                    <>
+                      <UserMenuRow icon={<FaTrash size={14} />} danger armed={removeAll.armed}
+                        label={removeAll.armed ? 'Press again to delete' : 'Remove profile and its saves'} onSelect={removeAll.press} />
+                      <div style={{ fontSize: '11px', color: V2.fgMuted, padding: '2px 12px 8px 39px', lineHeight: 1.4 }}>
+                        Also deletes its {saveCount} save and state {saveCount === 1 ? 'file' : 'files'} on this device.
+                        Copies on RomM are kept; anything not uploaded yet is lost.
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </>
