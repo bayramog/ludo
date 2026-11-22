@@ -6578,6 +6578,17 @@ class LudoBackend:
         """
         try:
             settings = self._require_settings()
+            # A re-pair ("Pair again" from the library banner) has no wizard
+            # behind it, so nothing would ever lift the setup hold below and
+            # save auto-sync stayed off until the plugin reloaded. Hold only
+            # for a device that wasn't set up yet.
+            ds_before = load_decky_settings()
+            already_set_up = bool(
+                settings.get('RomM', 'url')
+                and (settings.get('RomM', 'client_token', '')
+                     or (settings.get('RomM', 'username')
+                         and settings.get('RomM', 'password')))
+                and not ds_before.get('needs_onboarding'))
             settings.set('RomM', 'url', url)
             settings.set('RomM', 'client_token', token)
             settings.set('RomM', 'auto_connect', 'true')
@@ -6603,7 +6614,7 @@ class LudoBackend:
             # steps include the platform switches, and fetching everything now
             # would finish (or be minutes into) exactly the work those switches
             # exist to avoid. finish_onboarding() lifts this.
-            self._defer_library_fetch = True
+            self._defer_library_fetch = not already_set_up
             self._start_sync()
             _record_activity('account', 'Signed in', url)
             # 'paired' is reported separately from 'success' because the two mean
