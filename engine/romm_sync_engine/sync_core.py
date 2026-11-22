@@ -15,10 +15,10 @@ import copy
 from functools import wraps
 from pathlib import Path
 
-from .paths import app_id, cache_dir, client_name, config_dir, library_dir
+from .paths import app_id, cache_dir, client_name, config_dir, library_dir, machine_cache_dir, profile_id
 from .save_channels import snapshots_supported
 from . import events as _events
-from . import (eden_config, emulator_saves, folder_saves, gamecube_saves,
+from . import (cemu_saves, eden_config, emulator_saves, folder_saves, gamecube_saves,
                play_sessions, ps2_memcard, save_channels, switch_content, switch_nsz,
                title_ids)
 from urllib.parse import urljoin, quote, urlparse
@@ -1434,7 +1434,7 @@ def find_standalone_builds(key, spec, settings=None):
                 stem = low[:-len('.appimage')]
                 if not any(stem.startswith(n) for n in names):
                     continue
-                if entry.is_file() and os.access(entry, os.X_OK):
+                if entry.is_file() and _ensure_executable(entry):
                     add(str(entry), _standalone_build_label(spec, stem),
                         'appimage')
         except Exception:
@@ -1456,6 +1456,25 @@ def find_standalone_builds(key, spec, settings=None):
     return builds
 
 
+def _ensure_executable(path):
+    """True when `path` can be run, adding the exec bit if it's missing.
+
+    A downloaded AppImage arrives without +x, and a check on X_OK alone made
+    it invisible, as though it wasn't there. Setting the bit is what the user
+    would have to do by hand anyway, so do it for them when we own the file.
+    """
+    try:
+        if os.access(path, os.X_OK):
+            return True
+        mode = os.stat(path).st_mode
+        os.chmod(path, mode | ((mode & 0o444) >> 2))
+        logging.info(f"Made {path} executable (it was missing +x)")
+        return os.access(path, os.X_OK)
+    except OSError as e:
+        logging.warning(f"{path} is not executable and chmod failed: {e}")
+        return False
+
+
 def find_standalone_executable(key, spec, settings=None):
     """Locate the emulator for `key`, or '' when it isn't installed.
 
@@ -1475,7 +1494,10 @@ def find_standalone_executable(key, spec, settings=None):
                 if flatpak_app_installed(custom.split(':', 1)[1]):
                     return custom
             elif Path(custom).expanduser().exists():
-                return str(Path(custom).expanduser())
+                path = Path(custom).expanduser()
+                if path.is_file():
+                    _ensure_executable(path)
+                return str(path)
             # Fall through rather than refuse. An AppImage renamed by its
             # updater, or a flatpak since removed, would otherwise turn every
             # launch into a hard failure over a preference; auto-detection is
@@ -1504,7 +1526,7 @@ def find_standalone_executable(key, spec, settings=None):
                 # Startswith, not contains: an AppImage merely mentioning the
                 # emulator (a launcher, a sibling tool) is not the emulator.
                 if any(stem.startswith(n) for n in names):
-                    if entry.is_file() and os.access(entry, os.X_OK):
+                    if entry.is_file() and _ensure_executable(entry):
                         return str(entry)
         except Exception:
             continue
@@ -8291,6 +8313,18 @@ class RetroArchInterface:
             })
         return stale
 
+    @staticmethod
+    def _profile_save_dirs():
+        """This profile's own save/state folders, or None for the default profile.
+
+        RetroArch has one retroarch.cfg for everyone on the machine, so a
+        second profile's folders are never written there: the launch overlay
+        hands them to RetroArch for each session, and everything that asks
+        where RetroArch keeps saves gets the same answer from here.
+        """
+        from . import profiles
+        return profiles.save_dirs(profile_id())
+
     def _retroarch_cfg_value(self, key):
         """One key out of the detected install's retroarch.cfg, or ''.
 
@@ -8300,6 +8334,9 @@ class RetroArchInterface:
         value starting with ':' is relative to the content directory, neither of
         which is a path we can hand to a folder picker.
         """
+        own = self._profile_save_dirs()
+        if own and key in ('savefile_directory', 'savestate_directory'):
+            return str(own['saves' if key == 'savefile_directory' else 'states'])
         try:
             cfg_dir = self.find_retroarch_config_dir()
             if not cfg_dir:
@@ -8495,6 +8532,11 @@ class RetroArchInterface:
         Returns {'changed': bool, 'saves': str, 'states': str, 'reason': str}.
         """
         out = {'changed': False, 'saves': '', 'states': '', 'reason': ''}
+        own = self._profile_save_dirs()
+        if own:
+            out.update(saves=str(own['saves']), states=str(own['states']),
+                       reason='This profile passes its own folders at launch')
+            return out
         exe = (self.retroarch_executable or '').lower()
         if not exe:
             out['reason'] = 'no emulator detected'
@@ -8754,7 +8796,9 @@ class RetroArchInterface:
         for location in appimage_locations:
             if location.exists():
                 for appimage in location.glob('*.AppImage'):
-                    if appimage.is_file() and os.access(appimage, os.X_OK):
+                    if (appimage.is_file()
+                            and appimage.name.lower().startswith('retroarch')
+                            and _ensure_executable(appimage)):
                         # The name must START with RetroArch, which its official
                         # AppImages do (RetroArch-Linux-x86_64.AppImage). A
                         # contains-match picked up RomM-RetroArch-Sync-*.AppImage
@@ -9287,12 +9331,42 @@ class RetroArchInterface:
                         'platforms': list(spec['platforms'])})
         return out
 
+    @staticmethod
+    def _eden_user_args(executable):
+        """-u <n> so Eden plays as the current profile's own Switch user, whose
+        saves are the ones this profile syncs. Empty without profiles."""
+        from . import profiles
+        try:
+            if not profiles.profiles_in_use():
+                return []
+            data_dir = emulator_saves.eden_data_dir_for(executable)
+            index = profiles.eden_launch_index(data_dir)
+            return ['-u', str(index)] if index is not None else []
+        except Exception as e:
+            logging.warning(f"Eden user for this profile unavailable: {e}")
+            return []
+
+    @staticmethod
+    def _cemu_account_args(executable):
+        """-a <id> so Cemu plays as the current profile's own account, whose
+        saves are the ones this profile syncs. Empty without profiles."""
+        from . import profiles
+        try:
+            return profiles.cemu_launch_args(executable)
+        except Exception as e:
+            logging.warning(f"Cemu account for this profile unavailable: {e}")
+            return []
+
     def build_standalone_launch_command(self, rom_path, key, spec, executable):
         """argv for a standalone emulator, from its args template."""
         grant_root = Path(rom_path).parent
         if spec.get('resolve_rom') == 'wiiu':
             rom_path, grant_root = resolve_wiiu_rom(rom_path)
         args = [a.replace('{rom}', str(rom_path)) for a in spec['args']]
+        if key == 'eden':
+            args = self._eden_user_args(executable) + args
+        elif key == 'cemu':
+            args = self._cemu_account_args(executable) + args
         if spec.get('prelaunch') == 'cemu_audio_repair':
             repair_cemu_audio_device(executable)
         if executable.startswith('flatpak:'):
@@ -9840,16 +9914,116 @@ class RetroArchInterface:
             combo = self._menu_toggle_combo()
             if combo:
                 lines.append(f'input_menu_toggle_gamepad_combo = "{combo}"')
+            own = self._profile_save_dirs()
+            if own:
+                for path in own.values():
+                    path.mkdir(parents=True, exist_ok=True)
+                lines += [f'savefile_directory = "{own["saves"]}"',
+                          f'savestate_directory = "{own["states"]}"']
             # ensure_content_save_sorting can't run without a retroarch.cfg, so
             # the first session gets the same two values here.
             if self._unconfigured_tree():
                 lines += ['sort_savefiles_enable = "false"',
                           'sort_savefiles_by_content_enable = "true"']
             overlay.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            self._remember_overlaid_settings(cfg_dir, lines)
             return str(overlay)
         except Exception as e:
             print(f"⚠️  Could not write the launch config overlay: {e}")
             return ''
+
+    # Overlay keys that must not outlive the session. RetroArch saves its whole
+    # running config on exit (config_save_on_exit, on by default), appended
+    # values included, so without this a second profile's save folders became
+    # retroarch.cfg's — every profile's — and a sandbox's system folder stuck.
+    # Network commands and save sorting are left: Ludo wants those permanent.
+    OVERLAY_RESTORE_KEYS = ('system_directory', 'libretro_directory',
+                            'input_menu_toggle_gamepad_combo',
+                            'savefile_directory', 'savestate_directory')
+    OVERLAY_RESTORE_FILE = 'ludo-launch.restore.json'
+
+    @staticmethod
+    def _cfg_raw_lines(cfg, keys):
+        """{key: the line as written in cfg} for each key present."""
+        found = {}
+        if not cfg.exists():
+            return found
+        for line in cfg.read_text(encoding='utf-8', errors='replace').splitlines():
+            key = line.split('=', 1)[0].strip()
+            if key in keys and '=' in line and key not in found:
+                found[key] = line
+        return found
+
+    @staticmethod
+    def _cfg_line_value(line):
+        return line.split('=', 1)[1].strip().strip('"').strip() if line else None
+
+    def _remember_overlaid_settings(self, cfg_dir, lines):
+        """Note what retroarch.cfg held for each overlaid key, to put it back."""
+        try:
+            overlaid = {}
+            for line in lines:
+                key = line.split('=', 1)[0].strip()
+                if key in self.OVERLAY_RESTORE_KEYS:
+                    overlaid[key] = self._cfg_line_value(line)
+            record = Path(cfg_dir) / self.OVERLAY_RESTORE_FILE
+            # A record left by a session we never saw end still holds the true
+            # originals; the cfg may already carry that session's values.
+            if record.exists():
+                self.restore_overlaid_settings()
+            originals = self._cfg_raw_lines(Path(cfg_dir) / 'retroarch.cfg', overlaid)
+            entries = {k: {'overlay': v, 'original': originals.get(k)}
+                       for k, v in overlaid.items()
+                       if self._cfg_line_value(originals.get(k)) != v}
+            if entries:
+                record.write_text(json.dumps(entries), encoding='utf-8')
+            elif record.exists():
+                record.unlink()
+        except Exception as e:
+            print(f"⚠️  Could not note settings to restore after the session: {e}")
+
+    @staticmethod
+    def _same_path_value(written, overlay):
+        """Whether RetroArch's saved value is the overlay's, '~' abbreviation and all."""
+        if written == overlay:
+            return True
+        if written and overlay and written.startswith('~/'):
+            return overlay.endswith(written[1:])
+        return False
+
+    def restore_overlaid_settings(self):
+        """Undo what RetroArch saved from the last overlay into retroarch.cfg.
+
+        A key is only put back while it still holds the overlay's value: one
+        the user changed in RetroArch's menu during the session is theirs.
+        """
+        try:
+            cfg_dir = self.find_retroarch_config_dir() or self._install_tree()
+            if not cfg_dir:
+                return
+            record = Path(cfg_dir) / self.OVERLAY_RESTORE_FILE
+            if not record.exists():
+                return
+            entries = json.loads(record.read_text(encoding='utf-8'))
+            cfg = Path(cfg_dir) / 'retroarch.cfg'
+            if cfg.exists():
+                text = cfg.read_text(encoding='utf-8', errors='replace')
+                out, changed = [], False
+                for line in text.splitlines():
+                    key = line.split('=', 1)[0].strip()
+                    entry = entries.get(key) if '=' in line else None
+                    if entry and self._same_path_value(
+                            self._cfg_line_value(line), entry['overlay']):
+                        changed = True
+                        if entry['original'] is not None:
+                            out.append(entry['original'])
+                        continue
+                    out.append(line)
+                if changed:
+                    cfg.write_text('\n'.join(out) + '\n', encoding='utf-8')
+            record.unlink()
+        except Exception as e:
+            print(f"⚠️  Could not restore settings after the session: {e}")
 
     def _core_dir_override(self, core_path):
         """The core's folder when it is not RetroArch's libretro_directory, else ''."""
@@ -10302,6 +10476,11 @@ class RetroArchInterface:
         Returns:
             dict: Dictionary with 'saves' and/or 'states' keys pointing to configured paths
         """
+        own = self._profile_save_dirs()
+        if own:
+            for path in own.values():
+                path.mkdir(parents=True, exist_ok=True)
+            return dict(own)
         save_dirs = {}
         config_file = config_dir / 'retroarch.cfg'
 
@@ -10346,6 +10525,11 @@ class RetroArchInterface:
 
     def find_retroarch_dirs(self):
         """Find RetroArch save directories with comprehensive installation support"""
+        own = self._profile_save_dirs()
+        if own:
+            for path in own.values():
+                path.mkdir(parents=True, exist_ok=True)
+            return dict(own)
         save_dirs = {}
 
         # First, try to get the config directory and read configured paths
@@ -10852,7 +11036,7 @@ class RetroArchInterface:
             self._buildbot_index_cache = {}
             return {}
 
-        cache_file = cache_dir() / 'libretro_core_index.json'
+        cache_file = machine_cache_dir() / 'libretro_core_index.json'
         if not force_refresh:
             try:
                 blob = json.loads(cache_file.read_text(encoding='utf-8'))
@@ -10897,7 +11081,7 @@ class RetroArchInterface:
         """The last core list saved to disk, however old, or {}."""
         base, _ext = self._buildbot_base()
         try:
-            blob = json.loads((cache_dir() / 'libretro_core_index.json')
+            blob = json.loads((machine_cache_dir() / 'libretro_core_index.json')
                               .read_text(encoding='utf-8'))
             return blob['cores'] if blob.get('base') == base else {}
         except Exception:
@@ -11456,7 +11640,7 @@ class RetroArchInterface:
             if not info_dir.is_dir() or not os.access(info_dir, os.W_OK):
                 return
 
-            bundle = cache_dir() / 'libretro_info.zip'
+            bundle = machine_cache_dir() / 'libretro_info.zip'
             if (not bundle.exists()
                     or time.time() - bundle.stat().st_mtime > 86400):
                 r = requests.get('https://buildbot.libretro.com/assets/frontend/info.zip',
@@ -13125,6 +13309,7 @@ class AutoSyncManager:
             # still produces a close transition, rather than being mistaken for
             # a state we have already handled.
             eden_was_running = False
+            cemu_was_running = False
             last_network_state = False  # Local variable, not self._last_network_state
             startup_grace_period = True
             network_retry_count = 0
@@ -13149,6 +13334,7 @@ class AutoSyncManager:
                             # Clear per-file debounce; the session boundary (close)
                             # is where we push this play session's saves as a batch.
                             self.upload_debounce.clear()
+                            self.retroarch.restore_overlaid_settings()
                             # RomM session-based sync: reconcile all saves now that
                             # RetroArch has flushed them on exit.
                             self.trigger_session_save_sync("RetroArch closed")
@@ -13161,18 +13347,24 @@ class AutoSyncManager:
                     # on the next app start. Closing the emulator is the moment
                     # the save is both final and worth confirming to the user.
                     eden_running = emulator_saves.eden_is_running()
-                    now_running = bool(retroarch_running or eden_running)
+                    cemu_running = emulator_saves.cemu_is_running()
+                    now_running = bool(retroarch_running or eden_running or cemu_running)
                     if now_running != self.game_running:
                         self.game_running = now_running
                         _events.publish('game')
-                    # Cemu is not part of game_running: nothing syncs on its
-                    # close yet. It only ends a play session.
                     self._monitor_beat = time.time()
                     try:
-                        self.play_sessions.observe(
-                            self.game_running or emulator_saves.cemu_is_running())
+                        self.play_sessions.observe(self.game_running)
                     except Exception as e:
                         logging.warning(f"play session tracking: {e}")
+                    # Cemu, likewise: a Wii U save is final once Cemu exits.
+                    if cemu_running != cemu_was_running:
+                        if cemu_running:
+                            self.log("🎮 Cemu launched")
+                        else:
+                            self.log("🎮 Cemu closed")
+                            self.trigger_session_save_sync("Cemu closed")
+                        cemu_was_running = cemu_running
                     if eden_running != eden_was_running:
                         if eden_running:
                             self.log("🎮 Eden launched")
@@ -14765,6 +14957,7 @@ class AutoSyncManager:
             except Exception as e:
                 self.log(f"⚠️ Switch key check failed: {e}")
         inventory.extend(eden_entries)
+        inventory.extend(self._cemu_inventory_entries())
 
         # Dedupe by (rom_id, slot), keeping the newest file. Stale duplicate
         # copies of the same save (e.g. a leftover flat saves/Game.srm next to
@@ -15370,7 +15563,7 @@ class AutoSyncManager:
             if title_id in awaiting and self._eden_restore_still_owed(
                     title_id, awaiting[title_id]):
                 continue
-            rom_id = self._rom_id_for_title_id(title_id)
+            rom_id = self._save_rom_id(self._rom_id_for_title_id(title_id))
             if not rom_id:
                 # No local ROM carries this title ID. Without Sigil the ID is
                 # only legible in a ROM's filename, so an unmatched save is the
@@ -15409,6 +15602,149 @@ class AutoSyncManager:
                       _t1 - _t0, time.monotonic() - _t1, len(saves), len(entries))
         return entries
 
+    def _cemu_target(self, create=False):
+        """(install, account id) whose Wii U saves this profile syncs, or None.
+
+        The install is the one the configured Cemu runs (its mlc folder may
+        not exist yet when ``create``). The account is the profile's own
+        (see profiles.cemu_account), or Cemu's active one without profiles.
+        """
+        from . import profiles
+        try:
+            exe = find_standalone_executable('cemu', STANDALONE_EMULATORS['cemu'],
+                                             self.settings) or ''
+        except Exception:
+            exe = ''
+        found = cemu_saves.installs(exe or None)
+        if not found and not create:
+            return None
+        inst = found[0] if found else cemu_saves.install_for(exe)
+        pid = profiles.cemu_account(inst, create=create)
+        if isinstance(pid, dict):
+            message = pid.get('error') or 'no Cemu account for this profile'
+            if message != getattr(self, '_cemu_account_note', None):
+                self._cemu_account_note = message
+                self.log(f"ℹ️ Wii U saves not synced: {message}")
+            return None
+        return inst, (pid if pid is not None else cemu_saves.active_account(inst))
+
+    def _cemu_inventory_entries(self):
+        """Inventory rows for Cemu's Wii U saves, one zip per game.
+
+        Cemu keeps a save as folders under mlc01/usr/save/<title id>/, out
+        of RetroArch's save root, so nothing else finds them. Packed into our
+        cache (cemu_saves.pack, deterministic), never written into Cemu's
+        tree. Skipped while Cemu runs: games write as they go, and the sync
+        Cemu's close triggers picks the finished save up seconds later.
+        """
+        entries = []
+        if emulator_saves.cemu_is_running():
+            return entries
+        try:
+            target = self._cemu_target()
+        except Exception as e:
+            logging.debug(f"Cemu save discovery failed: {e}")
+            return entries
+        if not target:
+            return entries
+        inst, pid = target
+        pack_dir = cache_dir() / 'packed_saves' / 'cemu'
+        for title_id, unit in cemu_saves.units(inst.mlc, pid).items():
+            rom_id = self._save_rom_id(self._rom_id_for_title_id(title_id))
+            if not rom_id:
+                logging.debug(f"Cemu save {title_id} matches no known ROM; skipping")
+                continue
+            try:
+                packed = cemu_saves.pack(unit, title_id, pack_dir / f'{title_id}.zip')
+                if not packed:
+                    continue
+                entries.append({
+                    'rom_id': rom_id,
+                    'file_name': packed.name,
+                    'slot': 'autosave',
+                    'emulator': 'Cemu',
+                    '_upload_name': f'{AUTOSAVE_UPLOAD_STEM}.zip',
+                    'content_hash': RomMClient.compute_content_hash(packed),
+                    'updated_at': datetime.datetime.fromtimestamp(
+                        cemu_saves.newest(unit), tz=datetime.timezone.utc).isoformat(),
+                    'file_size_bytes': packed.stat().st_size,
+                    '_path': str(packed),
+                    '_autocleanup': True,
+                    '_autocleanup_limit': 10,
+                })
+            except Exception as e:
+                self.log(f"⚠️ Could not pack the Cemu save for {title_id}: {e}")
+        return entries
+
+    def _is_cemu_op(self, op):
+        """A server save for a Wii U game."""
+        return (_platform_of(self._game_for_rom(op.get('rom_id'))) == 'wiiu'
+                or str(op.get('emulator') or '').strip().lower() == 'cemu')
+
+    def _wiiu_title_id(self, rom_id):
+        """A Wii U game's 16-hex title id: RomM's scan of it, else the game on disk."""
+        game = self._game_for_rom(rom_id) or {}
+        data = game.get('romm_data') or {}
+        for value in (data.get('title_id'), data.get('save_target')):
+            key = self._title_id_key(value)
+            if key and re.fullmatch(r'0005[0-9A-F]{12}', key):
+                return key
+        local = game.get('local_path')
+        found = cemu_saves.title_id_from_rom(local) if local else None
+        return found or cemu_saves.title_id_from_name(
+            game.get('file_name') or data.get('fs_name') or '')
+
+    def _restore_cemu_save(self, op, device_id, session_id):
+        """Put a Wii U save zip from the server into Cemu, for this profile's
+        account only. Deferred (False) while Cemu runs or when nothing says
+        which title it is; the op stands for the next sync."""
+        if emulator_saves.cemu_is_running():
+            self.log("ℹ️ Save-sync: Cemu is running; the Wii U save will restore "
+                     "once it is closed.")
+            return False
+        rom_id = op.get('rom_id')
+        file_name = Path(op.get('file_name') or 'save.zip').name
+        if not file_name.lower().endswith('.zip'):
+            self.log(f"⚠️ Save-sync: {file_name!r} is not a Wii U save pack; not restoring it")
+            return False
+        target = self._cemu_target(create=True)
+        if not target:
+            return False
+        inst, pid = target
+        staged = cache_dir() / 'incoming_saves' / file_name
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        # No device_id: RomM would record this device as synced before the
+        # restore below has worked. Confirmed afterwards instead.
+        if not self.romm_client.download_save_by_id(
+                op.get('save_id'), 'saves', staged,
+                device_id=None, session_id=session_id):
+            return False
+        try:
+            if not _zipfile.is_zipfile(staged):
+                raise ValueError('not a zip')
+            title_id = self._wiiu_title_id(rom_id)
+            low = cemu_saves.zip_title_low(staged)
+            if title_id and low and title_id[8:].lower() != low:
+                raise ValueError(f'the save is for title {low}, not {title_id[8:]}')
+            if not title_id and low:
+                title_id = '00050000' + low.upper()
+            if not title_id:
+                raise ValueError('no title id for it')
+            pack_hash = RomMClient.compute_content_hash(staged)
+            parts = cemu_saves.restore(staged, inst.mlc, title_id, pid,
+                                       cemu_saves.backup_dir_for(cache_dir()))
+        except (ValueError, OSError, _zipfile.BadZipFile) as e:
+            self.log(f"⚠️ Save-sync: could not restore {file_name!r}: {e}")
+            return False
+        finally:
+            staged.unlink(missing_ok=True)
+        if device_id:
+            self.romm_client.confirm_save_downloaded(
+                op.get('save_id'), 'saves', device_id, content_hash=pack_hash)
+        self.log(f"✅ Restored Wii U {' + '.join(parts)} for {title_id} "
+                 f"(account {pid:08x})")
+        return True
+
     _NO_KEYS_MESSAGE = (
         'Firmware is installed, but prod.keys is missing, so Eden cannot '
         'decrypt any of it. Upload prod.keys to the Switch platform on RomM '
@@ -15445,7 +15781,7 @@ class AutoSyncManager:
                         and emulator_saves.keys_are_current(entry)):
                     continue
                 path = bios.download_firmware_entry(
-                    entry, cache_dir() / 'firmware' / entry['file_name'],
+                    entry, machine_cache_dir() / 'firmware' / entry['file_name'],
                     progress=progress)
                 if not path:
                     raise ValueError('download failed')
@@ -15627,7 +15963,7 @@ class AutoSyncManager:
                                 if key_count else f"{entry.get('file_name')} is already installed")}
 
         archive = bios.download_firmware_entry(
-            entry, cache_dir() / 'firmware' / entry['file_name'], progress=progress)
+            entry, machine_cache_dir() / 'firmware' / entry['file_name'], progress=progress)
         if not archive:
             return {'status': 'failed', 'keys': key_count,
                     'message': f"Could not download {entry.get('file_name')}"}
@@ -16380,14 +16716,15 @@ class AutoSyncManager:
             return summary
 
         inventory = self.build_sync_inventory()
-        if only_rom_id is not None:
-            inventory = [e for e in inventory if e['rom_id'] == only_rom_id]
+        scope = self._tile_scope(only_rom_id) if only_rom_id is not None else None
+        if scope is not None:
+            inventory = [e for e in inventory if e['rom_id'] in scope]
         # Parked conflicts are re-found every cycle; one that settled itself
         # meanwhile (the other side caught up) drops.
         state = self._conflicts()
         with state['lock']:
             dropped = [c for c, v in state['pending'].items()
-                       if only_rom_id is None or v['rom_id'] == only_rom_id]
+                       if scope is None or v['rom_id'] in scope]
             for cid in dropped:
                 del state['pending'][cid]
         if dropped:
@@ -16410,6 +16747,7 @@ class AutoSyncManager:
             self.log("⚠️ Save-sync: negotiate failed")
             return summary
 
+        operations = self._pick_tile_saves(operations or [], inventory)
         # Lookup local inventory entry by (rom_id, slot) for upload operations.
         inv_by_key = {(e['rom_id'], e['slot']): e for e in inventory}
         saves_dir = self.retroarch.save_dirs.get('saves')
@@ -16433,6 +16771,11 @@ class AutoSyncManager:
             if _games:
                 installed_roms = {g.get('rom_id') for g in _games
                                   if g.get('is_downloaded')}
+                # A grouped Wii U / Switch tile's save can be filed under any
+                # of its ROMs (_pick_tile_saves keeps one).
+                for g in _games:
+                    if g.get('is_downloaded') and _platform_of(g) in self.TILE_SAVE_PLATFORMS:
+                        installed_roms.update(self._tile_rom_ids(g))
         except Exception as e:
             logging.debug(f"could not resolve installed roms: {e}")
         # Track whether we updated any synced fingerprints so we persist once.
@@ -16447,7 +16790,7 @@ class AutoSyncManager:
             slot = op.get('slot')
             if (rom_id, slot) in channel_keys:
                 continue
-            if only_rom_id is not None and rom_id != only_rom_id:
+            if scope is not None and rom_id not in scope:
                 continue
             # Full op payload for non-trivial actions: shows the server's view
             # (its hash/updated_at) so a repeated upload/conflict can be
@@ -16830,6 +17173,8 @@ class AutoSyncManager:
             return self._restore_gci_save(op, device_id, session_id)
         if self._is_folder_op(op):
             return self._restore_folder_save(op, device_id, session_id)
+        if self._is_cemu_op(op):
+            return self._restore_cemu_save(op, device_id, session_id)
         file_name = op.get('file_name') or ''
         # is_switch_title_id is the save-directory test specifically: Eden files
         # a save under the BASE title, never an update or DLC id.
@@ -17454,11 +17799,150 @@ class AutoSyncManager:
         return f"{AUTOSAVE_UPLOAD_STEM}{Path(path).suffix.lower()}"
 
     def _game_for_rom(self, rom_id):
+        """The library entry for ``rom_id``: its own tile, else the tile it is
+        grouped into (a sibling or variant id has no entry of its own)."""
         try:
-            return next((g for g in (self.get_games() or [])
-                         if g.get('rom_id') == rom_id), None)
+            games = self.get_games() or []
+            found = next((g for g in games if g.get('rom_id') == rom_id), None)
+            if found is None and rom_id:
+                key = (id(games), len(games))
+                cached = getattr(self, '_tile_index', None)
+                if not cached or cached[0] != key:
+                    index = {}
+                    for g in games:
+                        for i in self._tile_rom_ids(g)[1:]:
+                            index.setdefault(i, g)
+                    cached = self._tile_index = (key, index)
+                found = cached[1].get(rom_id)
+            return found
         except Exception:
             return None
+
+    # Grouped tiles (an unpacked folder and a .wua of the same game, or two
+    # dumps of one Switch title) are one game with one save, and the save
+    # folder is the title's either way. Argosy files a save under the ROM it
+    # played and only reads saves on that ROM, so Ludo does the same when
+    # writing and, when reading, takes the newest save on any ROM of the tile.
+    TILE_SAVE_PLATFORMS = ('wiiu', 'switch')
+
+    @staticmethod
+    def _tile_rom_ids(game):
+        """Every ROM id grouped into ``game``'s tile, its own first."""
+        ids = [game.get('rom_id')]
+        for key in ('_sibling_files', '_region_save_siblings', 'sibling_roms'):
+            ids += [s.get('id') for s in (game.get(key) or []) if isinstance(s, dict)]
+        for key in (game.get('_variant_downloads') or {}):
+            try:
+                ids.append(int(key))
+            except (TypeError, ValueError):
+                pass
+        out = []
+        for i in ids:
+            if i and i not in out:
+                out.append(i)
+        return out
+
+    def _played_rom_id(self, game):
+        """The ROM of ``game``'s tile whose file this device plays: the version
+        last launched while it is still on disk, else the one at local_path."""
+        main = game.get('rom_id')
+        on_disk = {}
+        for key, v in (game.get('_variant_downloads') or {}).items():
+            path = (v or {}).get('local_path') if isinstance(v, dict) else None
+            try:
+                if path and Path(path).exists():
+                    on_disk[int(key)] = path
+            except (TypeError, ValueError, OSError):
+                continue
+        local = game.get('local_path')
+        main_on_disk = bool(local) and local not in on_disk.values()
+        try:
+            last = int(self.settings.get('LastVersion', str(main), '') or 0)
+        except Exception:
+            last = 0
+        if last and (last in on_disk or (last == main and main_on_disk)):
+            return last
+        if main_on_disk or not on_disk:
+            return main
+        return next((vid for vid, path in on_disk.items() if path == local),
+                    next(iter(on_disk)))
+
+    def _save_rom_id(self, rom_id):
+        """The ROM id a Wii U or Switch save from this device is filed under:
+        the version played here (see TILE_SAVE_PLATFORMS). Others unchanged."""
+        game = self._game_for_rom(rom_id)
+        if not game or _platform_of(game) not in self.TILE_SAVE_PLATFORMS:
+            return rom_id
+        return self._played_rom_id(game) or rom_id
+
+    def _tile_scope(self, rom_id):
+        """ROM ids a one-game sync covers: the whole tile for Wii U and Switch."""
+        game = self._game_for_rom(rom_id)
+        if game and _platform_of(game) in self.TILE_SAVE_PLATFORMS:
+            return set(self._tile_rom_ids(game)) | {rom_id}
+        return {rom_id}
+
+    @staticmethod
+    def _stamp(value):
+        try:
+            t = datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=datetime.timezone.utc)
+            return t.timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    def _pick_tile_saves(self, operations, inventory):
+        """One save per grouped Wii U / Switch game.
+
+        A tile's autosave can sit on several of its ROMs (another device
+        played the other version), and every one of them unpacks into the
+        same title folder, so applying them all would let an older one land
+        last. Of the server's saves on the tile's ROMs and this device's own,
+        the newest wins: a server save on another ROM of the tile replaces
+        what the device has only when it is newer and different, and the
+        others are left on the server untouched.
+        """
+        groups = {}
+        for op in operations:
+            if op.get('slot') != 'autosave':
+                continue
+            game = self._game_for_rom(op.get('rom_id'))
+            if not game or _platform_of(game) not in self.TILE_SAVE_PLATFORMS:
+                continue
+            groups.setdefault(game.get('rom_id'), (game, []))[1].append(op)
+        drop = set()
+        for main, (game, ops) in groups.items():
+            ids = set(self._tile_rom_ids(game))
+            local = next((e for e in inventory
+                          if e.get('slot') == 'autosave' and e.get('rom_id') in ids), None)
+            local_id = local.get('rom_id') if local else None
+            others = [op for op in ops if op.get('rom_id') != local_id
+                      and op.get('action') in ('download', 'conflict')]
+            if not others:
+                continue
+            best = max(others, key=lambda op: self._stamp(op.get('server_updated_at')) or 0)
+            best_t = self._stamp(best.get('server_updated_at')) or 0
+            own = [op for op in ops if op.get('rom_id') == local_id]
+            own_t = max([self._stamp(op.get('server_updated_at')) or 0 for op in own] + [0])
+            local_t = self._stamp(local.get('updated_at')) if local else None
+            wins = (best_t > own_t
+                    and (local is None
+                         or (best.get('server_content_hash') != local.get('content_hash')
+                             and best_t > (local_t or 0))))
+            for op in others:
+                if not (wins and op is best):
+                    drop.add(id(op))
+            if wins:
+                # The newer save is restored instead; the next sync files the
+                # result under this device's own ROM.
+                drop.update(id(op) for op in own if op.get('action') != 'no_op')
+                if best.get('action') == 'conflict':
+                    best['action'] = 'download'
+            logging.info(f"[SYNC-OP] tile {main}: "
+                         + (f"newest save is on ROM {best.get('rom_id')}" if wins
+                            else f"keeping this device's save on ROM {local_id}"))
+        return [op for op in operations if id(op) not in drop]
 
     def _dreamcast_card_name(self, rom_id, game, port):
         """The file flycast reads this game's VMU in ``port`` from.
@@ -17700,6 +18184,20 @@ class AutoSyncManager:
                         f"title-ID index: {len(self._title_id_index)} ROMs identified")
             except Exception as e:
                 logging.debug(f"could not build the title-ID index: {e}")
+            # Wii U: the id lives in the title's meta/meta.xml, which a .wua
+            # carries inside it. Read from the downloaded game itself, so a
+            # dump RomM did not identify still matches its Cemu save.
+            try:
+                for game in (self.get_games() or []):
+                    local = game.get('local_path')
+                    if not (local and game.get('rom_id')
+                            and _platform_of(game) == 'wiiu'):
+                        continue
+                    key = self._title_id_key(cemu_saves.title_id_from_rom(local))
+                    if key and key not in self._title_id_index:
+                        self._title_id_index[key] = game['rom_id']
+            except Exception as e:
+                logging.debug(f"could not index Wii U titles: {e}")
         return self._title_id_index.get(self._title_id_key(title_id))
 
     def sync_before_launch(self, game, core_name=None):
@@ -18855,7 +19353,7 @@ def _platform_of(game):
     slug = str((game or {}).get('platform_slug')
                or ((game or {}).get('romm_data') or {}).get('platform_slug') or '').lower()
     return {'dc': 'dreamcast', 'ngc': 'gamecube', 'gc': 'gamecube',
-            'n3ds': '3ds', 'nintendo-3ds': '3ds'}.get(slug, slug)
+            'n3ds': '3ds', 'nintendo-3ds': '3ds', 'wii-u': 'wiiu'}.get(slug, slug)
 
 
 def _flycast_card_id(product_number):
@@ -20275,6 +20773,13 @@ class SteamShortcutManager:
                 self._userdata_path_cache = p
                 return p
 
+        # With profiles, the Steam account using this profile, not a guess.
+        from . import profiles
+        linked = profiles.steam_config_dir()
+        if linked:
+            self._userdata_path_cache = linked
+            return linked
+
         # Auto-detect Steam userdata
         steam_roots = [
             Path.home() / '.steam' / 'steam' / 'userdata',
@@ -21264,7 +21769,13 @@ def find_steam_config_dir():
     Scans the usual install roots and picks the user with the most recently
     touched shortcuts.vdf, falling back to any user whose config dir exists but
     who has no shortcuts yet. Returns a Path or None.
+
+    With profiles, the Steam account using the current profile comes first.
     """
+    from . import profiles
+    linked = profiles.steam_config_dir()
+    if linked:
+        return linked
     steam_roots = [
         Path.home() / '.steam' / 'steam' / 'userdata',
         Path.home() / '.local' / 'share' / 'Steam' / 'userdata',

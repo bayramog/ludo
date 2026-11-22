@@ -1,5 +1,5 @@
 import { cloneElement, useEffect, useRef, useState } from "react";
-import { finishOnboarding, getConfig, getRommLogo, getSteamTileStatus, pairDevice, repairEmulatorPaths, saveConfig, setDeviceNameRpc, setLibraryPaths, setSteamTile, testRommConnection } from "../rpc";
+import { finishOnboarding, getConfig, getProfiles, getRommLogo, getSteamTileStatus, pairDevice, repairEmulatorPaths, saveConfig, setDeviceNameRpc, setLibraryPaths, setSteamTile, testRommConnection } from "../rpc";
 import { FileSelectionType, Focusable, Navigation, host, openFilePicker, showModal, ModalRoot, GamepadButton } from "@ludo/host";
 import { toaster } from "../toast";
 import { V2 } from "../theme";
@@ -9,6 +9,7 @@ import { Bumper, GameActionButton, PairCodeField, V2Segment, V2SettingsRow, V2Se
 import { _forceGamepadFocus, playSteamSound, useAutoFocus } from "../shell";
 import { V2Bg } from "../media";
 import { V2_FOCUS_STYLE } from "../focus";
+import { discardNewProfile } from "../profiles";
 import { QrCode, pickerStart, useQrPairing } from "../pairing";
 import { EmuStalePath, InstallProgressBar, PlatformSyncList, installSize, loadEmulatorStatus, publishEmulatorStatus, startEmulatorInstall, useEmulatorInstall, useEmulatorStatus, usePlatformSync, setWizardOpen} from "../emulator";
 // First run: welcome, connect, folders, done.
@@ -312,6 +313,25 @@ const WIZ_MODES: WizMode[] = ['qr', 'pair', 'login'];
 
 export function SetupWizard() {
   const [step, setStep] = useState(0);
+  // Other profiles on this machine (desktop only): the welcome step offers a
+  // way back to them.
+  const [otherProfiles, setOtherProfiles] = useState(false);
+  const othersReq = useRef<Promise<boolean> | null>(null);
+  useEffect(() => {
+    othersReq.current = getProfiles()
+      .then((l: any) => !!l?.supported && (l.profiles?.length ?? 0) > 1)
+      .catch(() => false);
+    othersReq.current.then(setOtherProfiles);
+  }, []);
+  // Back to the profile this one was added from. B pressed before the profile
+  // list arrived used to do nothing, so it waits for the list instead; the
+  // wizard fades at once so the restart behind it doesn't read as a dead press.
+  const [leaving, setLeaving] = useState(false);
+  const goBack = async () => {
+    if (leaving || !(await othersReq.current)) return;
+    setLeaving(true);
+    if (!(await discardNewProfile())) setLeaving(false);
+  };
   // 'qr' leads because it is the only route that asks for nothing but the URL —
   // the other two still cost a trip through the on-screen keyboard, and both
   // stay available for servers too old for device auth (or users without a
@@ -778,6 +798,7 @@ export function SetupWizard() {
         .wiz-dot--active { animation: wizDot 0.32s ease; }
       `}</style>
       <Focusable noFocusRing
+        onCancelButton={() => { if (cur === 'welcome') goBack(); }}
         // L1/R1 flip the login ↔ pair mode on the Connect step (mirrors the
         // home page's bumper tab paging; the keycaps flank the segment pill).
         onButtonDown={(evt: any) => {
@@ -793,6 +814,7 @@ export function SetupWizard() {
         }}
         style={{
           position: 'relative', zIndex: 2, width: '100%', maxWidth: '440px', margin: 'auto 0',
+          opacity: leaving ? 0 : 1, transition: 'opacity 0.18s ease',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', textAlign: 'center',
         }}>
         {/* Progress dots */}
@@ -813,8 +835,14 @@ export function SetupWizard() {
               <div style={{ fontSize: '14px', color: V2.fg2, lineHeight: 1.6, maxWidth: '420px' }}>
                 Connect to your RomM server to browse, download, and sync saves.
               </div>
-              <div style={{ marginTop: '8px' }}>
+              <div style={{ marginTop: '8px', display: 'flex', gap: '10px' }}>
                 <GameActionButton variant="emphasized" label="Get started" focusRef={startFocusRef} icon={<FaPlay size={13} style={{ marginLeft: '2px' }} />} onClick={next} />
+                {/* A new profile starts here, signed out: Back drops it and
+                    returns to the profile it was added from. */}
+                {otherProfiles && (
+                  <GameActionButton label="Back" icon={<FaChevronLeft size={13} />}
+                    onClick={goBack} />
+                )}
               </div>
             </div>
           )}
