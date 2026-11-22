@@ -237,7 +237,7 @@ function AddProfileCard({ onAdd, index }: { onAdd: () => void; index: number }) 
         cursor: 'pointer',
         // Dashed at rest, solid brand when focused so no dashes show under the ring.
         borderWidth: '1.5px', borderStyle: hot ? 'solid' : 'dashed', borderColor: hot ? V2.brand : 'rgba(255,255,255,0.22)',
-        background: hot ? 'rgba(24,24,34,0.85)' : 'transparent',
+        background: hot ? 'rgba(24,24,34,0.85)' : 'rgba(5,5,10,0.55)',
         transform: 'none', boxShadow: 'none',
         ...V2Focus.tile(hot),
         transition: 'transform .15s cubic-bezier(0.22,1,0.36,1), background .15s ease, border-color .15s ease, box-shadow .15s ease',
