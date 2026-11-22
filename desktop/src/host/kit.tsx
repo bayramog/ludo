@@ -168,22 +168,27 @@ export const Focusable = forwardRef(function Focusable(
       // With the mouse driving, honouring it lights a control up unprompted, so
       // drop it and let the pointer decide.
       autoFocus={autoFocus && !inMouseMode()}
-      onClick={(e) => {
-        // Shift+click is the alternate action, mirroring Shift+Enter below.
-        if (e.shiftKey && onSecondaryButton) {
-          e.preventDefault();
-          onSecondaryButton(e);
-          return;
-        }
-        activate?.(e);
-      }}
+      onClick={(e) => activate?.(e)}
       onContextMenu={(e) => {
-        // Right-click is the desktop idiom for "more options" — the same slot
-        // the pad reaches with Y. Only swallow the native menu when this
-        // Focusable actually has an options handler.
-        if (!onOptionsButton) return;
+        // Right-click is the pad's secondary button (game Details, profile
+        // Manage): the action people reach for most after Enter, so it gets
+        // the easy click. Only swallow the native menu when there is one.
+        if (!onSecondaryButton) return;
         e.preventDefault();
+        e.stopPropagation();
+        onSecondaryButton(e);
+      }}
+      onAuxClick={(e) => {
+        // Middle-click: the options slot (Account, Sync, Delete…), which
+        // right-click used to carry.
+        if (e.button !== 1 || !onOptionsButton) return;
+        e.preventDefault();
+        e.stopPropagation();
         onOptionsButton(e);
+      }}
+      onMouseDown={(e) => {
+        // A middle press would otherwise start the browser's autoscroll.
+        if (e.button === 1 && onOptionsButton) e.preventDefault();
       }}
       onKeyDown={(e) => {
         // Don't hijack Enter/Space when the key was pressed inside an editable
@@ -199,14 +204,25 @@ export const Focusable = forwardRef(function Focusable(
         // keyboard-only user can reach the same actions the footer legend
         // advertises. Checked before the plain-Enter case, which would otherwise
         // swallow Shift+Enter.
-        if (!editable && e.shiftKey && e.key === "Enter" && onSecondaryButton) {
+        // Space is the secondary button (Shift+Enter still works, for hands
+        // that learned it); M ("more") and the Menu key are options.
+        // Each key stops at the first control that handles it, so a Space that
+        // pressed a button doesn't also open the Details of a card around it,
+        // while one pressed on a card with no Details of its own still reaches
+        // a page-level action (the library's Account on M).
+        const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+        if (!editable && onSecondaryButton && ((e.key === " " && plain && !e.shiftKey) || (e.shiftKey && e.key === "Enter"))) {
           e.preventDefault();
+          e.stopPropagation();
           onSecondaryButton(e);
-        } else if (!editable && e.key === "ContextMenu" && onOptionsButton) {
+        } else if (!editable && onOptionsButton && (e.key === "ContextMenu" || (plain && !e.shiftKey && (e.key === "m" || e.key === "M")))) {
           e.preventDefault();
+          e.stopPropagation();
           onOptionsButton(e);
         } else if (!editable && activate && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
+          // Space now also means Details: don't let it reach a wrapping card.
+          if (e.key === " ") e.stopPropagation();
           playSound("activate");
           activate(e);
         } else if ((onCancelButton ?? onCancel) && e.key === "Escape") {
