@@ -280,8 +280,8 @@ const REDUCED_MOTION = () => !!window.matchMedia?.('(prefers-reduced-motion: red
 // Steam account with no profile yet opens the app on a machine with several.
 // embedded: rendered inside the account menu's own modal, on its blurred scrim,
 // in place of the menu panel. onLeaving lets that host fade its scrim with us.
-export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
-  { closeModal?: () => void; embedded?: boolean; onLeaving?: () => void }) {
+export function ProfilePickerModal({ closeModal, embedded, onLeaving, solid }:
+  { closeModal?: () => void; embedded?: boolean; onLeaving?: () => void; solid?: boolean }) {
   const [list, setList] = useState<ProfileList | null>(null);
   const [busy, setBusy] = useState(false);
   // Animated exit: fade the picker out, then unmount it. The chosen card
@@ -369,7 +369,7 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
 
   const profiles = list?.profiles ?? [];
   const body = (
-    <Focusable noFocusRing className={`romm-ui pf-scrim${embedded ? ' pf-embedded' : ''}${leaving ? ' pf-leaving' : ''}`}
+    <Focusable noFocusRing className={`romm-ui pf-scrim${embedded ? ' pf-embedded' : ''}${solid && !embedded ? ' pf-solid' : ''}${leaving ? ' pf-leaving' : ''}`}
         onCancelButton={close}
         onButtonDown={(e: any) => { if (e?.detail?.button === GamepadButton.CANCEL) close(); }}
         style={{
@@ -378,7 +378,10 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
           // Embedded: the account menu's scrim already blurs the page; a second
           // blur here would re-raster when the menu's went away, and some GPUs
           // skip the blur for a couple of frames then (sharp library flash).
-          ...(embedded ? {} : {
+          // Solid when opened at launch: the page behind is still filling its
+          // rows then, and that showed through the blur. It's ready by the
+          // time a profile is picked and this fades away.
+          ...(embedded ? {} : solid ? {} : {
             background: 'rgba(7,7,15,0.55)',
             WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)',
           }),
@@ -390,6 +393,8 @@ export function ProfilePickerModal({ closeModal, embedded, onLeaving }:
           .romm-modal-collapse, .romm-modal-collapse > div {
             background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important;
           }
+          /* Beats the rule above, which also caught the scrim's inline colour. */
+          .romm-modal-collapse .pf-scrim.pf-solid { background: ${V2.bg} !important; }
         `}</style>
         <div onClick={close} style={{ position: 'absolute', inset: 0 }} />
         <div className="pf-rise" style={{ position: 'relative', textAlign: 'center' }}>
@@ -549,7 +554,14 @@ export async function initProfiles() {
     }
     sessionStorage.removeItem('romm:reopen-picker');
     // Back from a new profile lands in the picker, on the profile it came from.
-    if (list?.supported && (list.ask || reopen)) showModal(<ProfilePickerModal />);
+    if (list?.supported && (list.ask || reopen)) {
+      showModal(<ProfilePickerModal solid />);
+      // Lift the cover once the picker has finished coming in (the modal's
+      // fade and the cards' rise): lifted together, the half-faded picker let
+      // the page behind show through for a moment.
+      setTimeout(liftBootCover, REDUCED_MOTION() ? 0 : 450);
+      return;
+    }
   } catch { /* single-profile shells have nothing to ask */ }
   liftBootCover();
 }
