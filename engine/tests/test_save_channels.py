@@ -10,7 +10,8 @@ in every row, or the two clients would fight over one channel.
 Asserted:
 
   * every row of the decide table, plus the restored-by-choice case;
-  * a heartbeat advertises the API only through SAVE_SYNC.SNAPSHOTS;
+  * a heartbeat advertises the API through SAVE_SYNC.SNAPSHOTS or, as 5.5.0-beta.1
+    ships, SAVE_SYNC.SNAPSHOT_RETENTION;
   * a save maps to the ROM *file* it was written from, and an ambiguous one
     maps to nothing rather than to the wrong file;
   * the channel a device follows wins over 'default', which wins over the
@@ -85,6 +86,7 @@ def test_decide():
 
 def test_heartbeat():
     check('advertised', snapshots_supported({'SAVE_SYNC': {'SNAPSHOTS': True}}), True)
+    check('5.5.0-beta.1 shape', snapshots_supported({'SAVE_SYNC': {'SNAPSHOT_RETENTION': 10, 'SNAPSHOT_BRANCH_LIFETIME_DAYS': 30}}), True)
     check('older server', snapshots_supported({'SYSTEM': {'VERSION': '5.4.0'}}), False)
     check('explicitly off', snapshots_supported({'SAVE_SYNC': {'SNAPSHOTS': False}}), False)
     check('no body', snapshots_supported(None), False)

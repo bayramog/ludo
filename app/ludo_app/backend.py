@@ -1749,7 +1749,10 @@ class LudoBackend:
     # the save-matching code in sync_core (which attributes a save to a rom by
     # matching disc/member filenames, and falls back destructively when it finds
     # nothing), so they must stay present and complete for every game.
-    _SNAPSHOT_FILE_KEYS = ('file_name', 'fs_name', 'file_size_bytes', 'size_bytes', 'category')
+    # `id` is the RomM file id: save channels are keyed to one ROM file, so
+    # without it every save fell back to negotiate after a cold start.
+    _SNAPSHOT_FILE_KEYS = ('id', 'file_name', 'fs_name', 'file_size_bytes', 'size_bytes',
+                           'category')
     _SNAPSHOT_SIBLING_KEYS = ('id', 'name', 'fs_name', 'fs_name_no_ext', 'fs_extension',
                               'has_file_on_disk')
 
@@ -6589,18 +6592,25 @@ class LudoBackend:
                 device = self._romm_client.get_device(existing)
                 if device:
                     logging.info(f"[DEVICE] verified on server: {existing}")
-                    # Remember the identifier RomM matches this device by, so a
-                    # later QR pairing lands on this same device (see
-                    # _pairing_identifier).
-                    ident = (device.get('client_device_identifier') or '').strip()
-                    if ident and ident != self._settings.get('Device', 'client_identifier', ''):
-                        self._settings.set('Device', 'client_identifier', ident)
-                    # Reconcile a rename made while offline. set_device_name
-                    # pushes immediately when it can, but the wizard often runs
-                    # before the first connect, so the server would otherwise
-                    # keep showing the hostname forever.
-                    self._push_device_name(existing, remote=device.get('name'))
-                    return existing
+                    return self._use_device(existing, device)
+
+            # A token paired by QR is bound to the device RomM created for it.
+            # From 5.5 RomM answers that token 404 for any OTHER device, on the
+            # sync, saves and device routes alike (rommapp/romm#5460), so an
+            # install still syncing as an older device of its own lost save
+            # sync entirely, and registering a fresh device only repeated
+            # that. Take the token's device: the server's per-device sync
+            # history starts over, which beats not syncing. Servers that still
+            # serve the old device took the branch above and keep it.
+            bound = self._token_bound_device_id()
+            if bound and bound != existing:
+                device = self._romm_client.get_device(bound)
+                if device:
+                    self._settings.set('Device', 'device_id', bound)
+                    self._install_not_bound = False
+                    logging.info(f"[DEVICE] adopted the token's device {bound} "
+                                 f"(was {existing or 'none'})")
+                    return self._use_device(bound, device)
 
             import socket as _socket
             device_id = self._romm_client.register_device(
@@ -6618,6 +6628,31 @@ class LudoBackend:
         except Exception as e:
             logging.error(f"[DEVICE] registration error: {e}", exc_info=True)
             return None
+
+    def _use_device(self, device_id, device):
+        """Finish taking ``device`` (the server's record) as this install's."""
+        # Remember the identifier RomM matches this device by, so a later QR
+        # pairing lands on this same device (see _pairing_identifier).
+        ident = (device.get('client_device_identifier') or '').strip()
+        if ident and ident != self._settings.get('Device', 'client_identifier', ''):
+            self._settings.set('Device', 'client_identifier', ident)
+        # Reconcile a rename made while offline. set_device_name pushes
+        # immediately when it can, but the wizard often runs before the first
+        # connect, so the server would otherwise keep showing the hostname
+        # forever.
+        self._push_device_name(device_id, remote=device.get('name'))
+        return device_id
+
+    def _token_bound_device_id(self):
+        """The device RomM bound this install's client token to, or None.
+
+        /api/users/me reports it as current_device_id: the token's device, or
+        nothing for a token made in RomM's web UI, which no device owns. A
+        password session has no token, so no binding."""
+        if not getattr(self._romm_client, 'client_token', None):
+            return None
+        me = self._romm_client.get_current_user() or {}
+        return (me.get('current_device_id') or '').strip() or None
 
     async def pair_device(self, url: str, code: str):
         """Pair with RomM using an 8-digit Client API Token code (no password).

@@ -28,8 +28,13 @@ DEFAULT_CHANNEL = 'default'
 
 
 def snapshots_supported(heartbeat):
-    """True when a /api/heartbeat body advertises the snapshot API."""
-    return bool(((heartbeat or {}).get('SAVE_SYNC') or {}).get('SNAPSHOTS'))
+    """True when a /api/heartbeat body advertises the snapshot API.
+
+    The PR drafts sent SAVE_SYNC.SNAPSHOTS; 5.5.0-beta.1 shipped without it and
+    reports only the snapshot limits, so either one counts."""
+    save_sync = (heartbeat or {}).get('SAVE_SYNC') or {}
+    return bool(save_sync.get('SNAPSHOTS')
+                or 'SNAPSHOT_RETENTION' in save_sync)
 
 
 # ── Decide ────────────────────────────────────────────────────────────────

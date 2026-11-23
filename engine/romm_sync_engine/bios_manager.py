@@ -73,6 +73,11 @@ class BiosManager:
             'segacd': 'Sega - Mega-CD - Sega CD',
             'dreamcast': 'Sega - Dreamcast',
             'dc': 'Sega - Dreamcast',
+            # flycast reads naomi.zip / awbios.zip from the same dc/ folder
+            'naomi': 'Sega - Dreamcast',
+            'naomi2': 'Sega - Dreamcast',
+            'naomigd': 'Sega - Dreamcast',
+            'atomiswave': 'Sega - Dreamcast',
             'neo-geo': 'SNK - Neo Geo',
             'neogeo': 'SNK - Neo Geo',
             'nintendo-ds': 'Nintendo - Nintendo DS',
