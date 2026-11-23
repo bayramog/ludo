@@ -1,5 +1,5 @@
-// Native CI only: real Windows interpreters, backend, pipes, bind and RPC.
-// Use a junction to the CI interpreter for the packaged layout. This is not a release ZIP.
+// Native CI: real interpreters, backend, pipes, bind and profile RPC.
+// The packaged layout links to the CI interpreter installation.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -14,8 +14,8 @@ import { bootShell } from "./support/backend-shell.mjs";
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const next = (events, name) => once(events, name, { signal: AbortSignal.timeout(75000) });
 for (const mode of ["development", "packaged layout", "occupied port"]) {
-  test(mode + " with the real Windows backend", async t => {
-    assert.equal(process.platform, "win32");
+  test(mode + " with the real " + process.platform + " backend", async t => {
+    const windows = process.platform === "win32";
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "Ludo İzmir 東京 "));
     t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
     const packaged = mode !== "development";
@@ -31,7 +31,7 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
     fs.copyFileSync(path.join(repo, "desktop", "package.json"), path.join(desktop, "package.json"));
     const py = (...args) => execFileSync("python", args, { cwd: repo, encoding: "utf8" }).trim();
     if (packaged) {
-      fs.symlinkSync(py("-c", "import sys; print(sys.base_prefix)"), path.join(resources, "python"), "junction");
+      fs.symlinkSync(py("-c", "import sys; print(sys.base_prefix)"), path.join(resources, "python"), windows ? "junction" : "dir");
     } else {
       py("-m", "venv", "--system-site-packages", "--without-pip", path.join(desktop, ".venv"));
     }
@@ -47,12 +47,12 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
       "from test_support import fixture_environment", "print(json.dumps(fixture_environment(Path(sys.argv[1]))))",
     ].join("; "), root));
     env.ROMM_PORT = String(port);
-    env.PYTHONHOME = "poisoned parent Python home";
+    if (windows) env.PYTHONHOME = "poisoned parent Python home";
     const children = [];
     const { events, ipc, app } = bootShell({
-      packaged, desktop, resources, paths: path, env,
+      packaged, desktop, resources, paths: path, platform: process.platform, env,
       spawn(exe, args, opts) {
-        assert.equal(opts.windowsHide, true);
+        assert.equal(opts.windowsHide, windows);
         const child = spawn(exe, args, opts);
         children.push(child);
         return child;

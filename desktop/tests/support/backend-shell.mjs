@@ -8,13 +8,13 @@ import vm from "node:vm";
 const main = new URL("../../electron/main.cjs", import.meta.url);
 const requireMain = createRequire(main);
 
-export function bootShell({ packaged, resources, desktop, paths, env, spawn, existsSync = fs.existsSync, timers = {} }) {
+export function bootShell({ packaged, resources, desktop, paths, platform = "win32", env, spawn, existsSync = fs.existsSync, timers = {} }) {
   const events = new EventEmitter();
   const ipc = new EventEmitter();
   ipc.handle = () => {};
   const sink = () => new Writable({ write(_data, _enc, done) { done(); } });
   const proc = Object.assign(new EventEmitter(), {
-    platform: "win32", argv: [], env, resourcesPath: resources, stdout: sink(), stderr: sink(),
+    platform, argv: [], env, resourcesPath: resources, stdout: sink(), stderr: sink(),
   });
   const app = Object.assign(new EventEmitter(), {
     isPackaged: packaged, getPath: () => desktop, setName() {}, setPath() {},

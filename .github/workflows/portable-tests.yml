@@ -32,9 +32,9 @@ jobs:
         run: |
           python -m pip install -e engine
           python -m pip install -e "app[test]"
-      - name: Windows backend launch, profile switch and shutdown
-        if: ${{ !cancelled() && runner.os == 'Windows' && steps.install.outcome == 'success' }}
-        run: node --test desktop/tests/backend-lifecycle.test.mjs desktop/tests/windows-backend.native.mjs
+      - name: Native backend launch, profile switch and shutdown
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node --test desktop/tests/backend-lifecycle.test.mjs desktop/tests/backend.native.mjs
       - name: Windows owned process tree and external emulator
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.install.outcome == 'success' }}
         run: python desktop/tests/windows_process_tree.py

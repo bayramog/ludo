@@ -183,10 +183,10 @@ for Windows ACL/device acceptance. This is not an ACL verification claim.
 
 ### Desktop backend lifecycle (#10)
 
-The native Windows jobs also run the Electron main entry with a test window,
+The native Windows and Linux jobs also run the Electron main entry with a test window,
 real Python processes, a temporary profile and an occupied loopback port.
 The development case creates a venv under a spaced Unicode path. The packaged
-layout uses a directory junction to the runner's Python installation. Both
+layout links to the runner's Python installation (a junction on Windows). Both
 cases start the real server, create a profile through RPC, restart on the
 same port and verify the new profile before closing the window.
 `desktop/tests/windows_process_tree.py` exercises a child and grandchild,
