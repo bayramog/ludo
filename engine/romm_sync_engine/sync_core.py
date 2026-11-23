@@ -21,8 +21,8 @@ from .owned_tasks import OwnedTasks
 from .save_channels import snapshots_supported
 from . import events as _events
 from . import (cemu_saves, eden_config, emulator_saves, folder_saves, gamecube_saves,
-               play_sessions, ps2_memcard, save_channels, switch_content, switch_nsz,
-               title_ids)
+               play_sessions, ps2_memcard, save_channels, save_convert, switch_content,
+               switch_nsz, title_ids)
 from urllib.parse import urljoin, quote, urlparse
 import socket
 import configparser
@@ -19326,6 +19326,20 @@ class AutoSyncManager:
                                     original_filename, 'saves', emulator_save_dir))
                             final_path = emulator_save_dir / retroarch_filename
 
+                    target_core = core_name
+                    if not target_core and final_path and hasattr(self, '_core_for_game'):
+                        try:
+                            target_core = self._core_for_game(game)
+                        except Exception:
+                            target_core = None
+                    convert = bool(final_path) and save_convert.needs_conversion(
+                        original_filename, romm_emulator, _platform_of(game), target_core)
+                    raw_path = final_path
+                    if convert:
+                        # The core reads <stem>.srm whatever the server named it.
+                        final_path = final_path.with_suffix('.srm')
+                        retroarch_filename = final_path.name
+
                     # Only skip download if the local file actually exists AND
                     # the API confirms this device has the current version.
                     # Never skip on "this device uploaded it": that misses a
@@ -19375,8 +19389,13 @@ class AutoSyncManager:
 
                             if self.romm_client.download_save(rom_id, 'saves', temp_path, device_id):
                                 try:
-                                    if temp_path != final_path:
-                                        temp_path.rename(final_path)
+                                    converted = convert and save_convert.convert_into_core(
+                                        temp_path, final_path, _platform_of(game), target_core,
+                                        game.get('local_path'), self.log)
+                                    if not converted:
+                                        final_path = raw_path
+                                        if temp_path != final_path:
+                                            temp_path.rename(final_path)
                                     downloads_successful += 1
                                     self.log(f"  ✅ Save ready: {retroarch_filename}")
                                     # Record fingerprint so upload worker treats this as already-uploaded,
