@@ -33,7 +33,11 @@ contracts. Existing engine `ok` lines, unittest cases and completion markers are
 reported separately: they are not interchangeable assertion counts. A silent
 zero-exit script fails. Standalone `skip`/`SKIP` lines also fail the gate (including a missing 7z binary
 in the Linux Cemu fixture). Backend runs real pytest, parses its private JUnit
-counts and rejects zero tests or unexpected skips.
+counts and rejects zero tests or unexpected skips. A private pytest plugin also
+records collected/executed counts by each item's resolved file path, so an empty
+selected file cannot borrow a passing sibling's tests. Parametrized, class and
+unittest cases retain normal single-process pytest collection. Actual test
+errors/skips take precedence over the per-file zero-test diagnosis.
 
 ## Platform accounting
 
@@ -52,8 +56,8 @@ typecheck. These browser tests are Linux-hosted; Windows packaged UI acceptance
 remains in [F5-04](https://github.com/bayramog/ludo/issues/243).
 
 The runner's three Bash compatibility/bootstrap tests are POSIX-only and
-visibly skipped on Windows: Windows invokes Python directly. Its other twenty
-negative/execution contracts execute on both OSes. Tracking: [F1-06](https://github.com/bayramog/ludo/issues/11).
+visibly skipped on Windows: Windows invokes Python directly. Its other twenty-six
+negative/execution and fixture contracts execute on both OSes. Tracking: [F1-06](https://github.com/bayramog/ludo/issues/11).
 
 ## Isolation and failure evidence
 
@@ -67,7 +71,8 @@ fixtures or loopback servers; CI does not receive RomM credentials or libraries.
 `--report-dir <new-directory>` writes a structured `summary.json` (maximum
 256 KiB). Reusing a report directory is rejected to prevent stale evidence.
 The report records commit, OS/Python versions, selection, exclusions, per-file
-status/counts, exit codes, timeouts, elapsed time and at most twelve traceback
+status/counts (including per-backend-file collection/execution), exit codes,
+timeouts, elapsed time and at most twelve traceback
 file/line locations per failed group. It does not contain raw output, exception
 messages, environment, JUnit XML, settings, keys or profile contents. Raw child
 output is bounded to its last 64 KiB on failure in the job console. Failure
@@ -85,21 +90,36 @@ versions. All backend cases passed after fixing per-test Windows user roots
 and moving play-time fixtures away from pre-epoch local timestamps. The initial
 engine probe failed 15 files. Two fixture fixes (native Eden path expectations
 and isolated Switch-key profile roots) retain those files in the native gate.
-The resulting selection is 52 engine files plus the complete 176-case backend;
-Linux continues to run all 65 engine files. No backend file/case is excluded.
+The first selection was 52 engine files plus the complete 176-case backend.
+The fork review then audited all thirteen exclusions against their actual
+contracts. Whole-file exclusions were too broad for several mixed suites:
+portable checks now run separately from their native integration dependencies.
+The current inventory is **73 engine files: 62 selected on Windows, 11 explicitly
+excluded; all 73 run on Linux**. All 17 backend files / 176 cases remain selected.
+No old Linux check label was dropped in the split; real Linux boot identity also
+has its own check alongside synthetic session recovery.
 
-The manifest is the executable source of the following exclusions; every
-Windows run prints the exact per-file reason and issue URL.
-
-| Files excluded on Windows | Observed dependency / follow-up |
+| Originally excluded file | Review decision and remaining boundary |
 | --- | --- |
-| `test_bios_readiness.py`, `test_dreamcast_sync.py`, `test_switch_content.py`, `test_title_ids.py` | Bundled Linux Sigil cannot load; disc/serial/region extraction fails. [F1-04 #8](https://github.com/bayramog/ludo/issues/8). BIOS readiness also contains POSIX relative-path/symlink expectations. |
-| `test_switch_nsz.py` | Native zstd/crypto loader cannot supply the libraries for real container round trips. [F1-04 #8](https://github.com/bayramog/ludo/issues/8). |
-| `test_emulator_saves.py`, `test_play_sessions.py` | POSIX executable and `/proc`/boot ownership assumptions. [F1-03 #10](https://github.com/bayramog/ludo/issues/10). |
-| `test_bios_folder.py`, `test_flatpak_launcher_path.py` | Flatpak/RetroDECK install/config/first-run fixtures do not represent Windows discovery. [F2-01 #9](https://github.com/bayramog/ludo/issues/9). |
-| `test_cemu_standalone.py`, `test_flatpak_rom_grant.py` | Linux Flatpak/AppImage command and controller-repair contracts. [F2-03 #16](https://github.com/bayramog/ludo/issues/16). |
-| `test_launch_core_dir.py` | Existing `:/` normalization strips Windows drive prefixes; redundant core override observed. Also covers Linux lib64 discovery. [F2-03 #16](https://github.com/bayramog/ludo/issues/16). |
-| `test_decky_stdlib_imports.py` | Decky Unix `pwd`/getpass fallback; Windows has no `pwd`. Kept in full Linux, while Windows account and encryption contracts execute separately. [F1-06 #11](https://github.com/bayramog/ludo/issues/11). |
+| `test_bios_folder.py` | Retained exclusion: these fixtures explicitly select Flatpak config/first-launch trees; the Windows resolver deliberately bypasses that discovery. [#9](https://github.com/bayramog/ludo/issues/9). |
+| `test_bios_readiness.py` | Restored 51 portable readiness, download, BIOS option, blank-save and region-fallback checks. Real serial reading moved to `test_bios_readiness_sigil.py` ([#8](https://github.com/bayramog/ludo/issues/8)); POSIX symlink topology moved to `test_bios_readiness_symlinks.py` ([#9](https://github.com/bayramog/ludo/issues/9)). Both integration files remain excluded on Windows. |
+| `test_cemu_standalone.py` | Restored resolver, ZIP/7z extraction and argv contracts. Linux executable discovery, chmod and XDG audio repair moved intact to excluded `test_cemu_standalone_linux.py` ([#16](https://github.com/bayramog/ludo/issues/16)). Command construction does not establish native Flatpak/AppImage execution on Windows. |
+| `test_decky_stdlib_imports.py` | Restored source-import guards and environment precedence; compare the native Windows fallback with `os.getlogin`, retaining the real Unix `pwd` comparison on Linux. |
+| `test_dreamcast_sync.py` | Retained exclusion: disc-derived VMU names feed the real sync/restore path. Replacing Sigil with a stub would remove the end-to-end identity contract. [#8](https://github.com/bayramog/ludo/issues/8). |
+| `test_emulator_saves.py` | Restored 12 filesystem/discovery/packing checks; close fixture ZIP handles before cleanup. Live process/zombie/SIGTERM checks moved intact to excluded `test_emulator_saves_process.py` ([#10](https://github.com/bayramog/ludo/issues/10)). |
+| `test_flatpak_launcher_path.py` | Restored all nine custom-launcher/config/overlay checks by setting all user-profile roots. This is path resolution, not a native Flatpak launch. |
+| `test_flatpak_rom_grant.py` | Restored the argv contract using native fixture path spelling. Checks folder grant, spaces/Unicode and arguments; does not execute Flatpak. |
+| `test_launch_core_dir.py` | Retained exclusion: actual product `:/` normalization strips Windows drive prefixes and causes redundant core overrides. Linux lib64 discovery also remains here. This test-infrastructure change does not fix the launcher product issue. [#16](https://github.com/bayramog/ludo/issues/16). |
+| `test_play_sessions.py` | Restored queue/upload/heartbeat/stats/recovery coverage. Synthetic clock recovery now uses a synthetic boot identity, plus an unknown-boot case. Excluded `test_play_sessions_linux_boot.py` preserves the real `/proc` boot identity check on Linux; Windows native identity remains [#10](https://github.com/bayramog/ludo/issues/10). |
+| `test_switch_content.py` | Restored 88 real synthetic-container/install/ranking checks. Package-presence/load assertions moved intact to excluded `test_switch_content_sigil.py` ([#8](https://github.com/bayramog/ludo/issues/8)). |
+| `test_switch_nsz.py` | Real compressed-container round trips remain excluded for missing native zstd/crypto ([#8](https://github.com/bayramog/ludo/issues/8)); 15 loader-fallback/name/error contracts now run separately in `test_switch_nsz_contracts.py`. |
+| `test_title_ids.py` | Restored 33 save/header/name/ranking checks. Real disc and zipped-disc identity moved intact to excluded `test_title_ids_sigil.py` ([#8](https://github.com/bayramog/ludo/issues/8)). |
+
+Review regressions first reproduced the false-green mixed empty/passing backend
+selection, Windows HOME/USERPROFILE mismatch, and fake-clock recovery's reliance
+on host boot identity. Additional CLI tests cover parametrized/class/unittest
+file attribution and preserve setup-error/skip precedence. The manifest remains
+the executable source of all eleven exclusion reasons and issue links.
 
 Inside `test_batch_regressions.py`, the two POSIX owner-mode assertions only
 execute on POSIX. Windows still executes credential migration/encryption/readback,

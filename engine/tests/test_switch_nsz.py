@@ -181,13 +181,8 @@ def test_xcz(tmp):
                   hashlib.sha256(data[offset:offset + hashed]).digest() == digest, True)
 
 
-def main():
+def test_contracts():
     test_load()
-    if FAILURES:
-        return 1
-    if not Z.available():
-        print('libzstd or libcrypto missing; cannot test')
-        return 1
     check('converted_name', Z.converted_name('A [v0].XCZ'), 'A [v0].xci')
     check('converted_name of a plain file', Z.converted_name('A.nsp'), None)
     check('missing libraries are named',
@@ -196,6 +191,12 @@ def main():
           'free space' in Z.describe_failure(OSError(28, 'No space left on device')), True)
     check('a bad file says to download it again',
           'download it' in Z.describe_failure(Z.DecompressError('NCZ ends early')), True)
+
+
+def main():
+    if not Z.available():
+        print('libzstd or libcrypto missing; cannot test')
+        return 1
     for test in (test_nsz, test_corrupt, test_xcz):
         with tempfile.TemporaryDirectory() as d:
             test(Path(d))
