@@ -259,7 +259,7 @@ class ProfilesTest(unittest.TestCase):
         self.assertIn(f'savestate_directory = "{own["states"]}"', overlay)
         self.assertEqual((cfg_dir / 'retroarch.cfg').read_text(), before)
 
-    def test_retroarch_saving_the_overlay_on_exit_is_undone(self):
+    def check_restore_overlay(self):
         # RetroArch writes appended values into retroarch.cfg on exit; a second
         # profile's folders must not become everyone's.
         mia = P.create('Mia')

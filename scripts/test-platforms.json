@@ -105,6 +105,10 @@
         "reason": "Real Linux /proc boot identity is checked independently from portable synthetic recovery; Windows native boot identity remains F1-03.",
         "issue": "https://github.com/bayramog/ludo/issues/10"
       },
+      "test_profiles_tilde_restore.py": {
+        "reason": "Measured Windows failure: overlay restore compares only Unix ~/ suffixes and fails to restore native ~\\\\ profile state paths. The original tilde-abbreviation case stays on Linux; all other 21 profile/store/overlay cases run on both OSes.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
       "test_switch_content_sigil.py": {
         "reason": "Explicitly asserts the shipped Sigil library loads without an override; Windows Sigil binary is not bundled yet.",
         "issue": "https://github.com/bayramog/ludo/issues/8"

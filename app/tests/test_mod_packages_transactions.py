@@ -11,5 +11,3 @@ def test_download_is_one_revalidated_file_then_install_and_remove(client, tmp_pa
     assert M.state(client, 1200, TITLE)['installed'][0]['package_id'] == '1200:2'
     assert M.remove(TITLE, '1200:2')['status'] == 'ok'
     assert not (tmp_path / MOD).exists()
-
-

@@ -57,5 +57,3 @@ def client(tmp_path, monkeypatch):
         return Reply(blob=stream.getvalue()) if '/content/' in url else Reply(detail)
     c.session = SimpleNamespace(get=get)
     return c
-
-
