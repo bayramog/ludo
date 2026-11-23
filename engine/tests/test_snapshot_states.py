@@ -143,6 +143,22 @@ def test_scan_and_write():
                                                                  'download_path': '/nine'}}}},
                                       overwrite=True), False)
 
+        # Same state, lost thumbnail: only the PNG comes back, once.
+        shot0 = {'states': {'mgba': {'0': {'content_hash': zero.content_hash,
+                                            'download_path': '/zero',
+                                            'screenshot': {'download_path': '/zero.png'}},
+                                      'auto': {'content_hash': 'differs', 'download_path': '/a',
+                                               'screenshot': {'download_path': '/a.png'}}}}}
+        (folder / 'Game.state.auto.png').unlink()
+        api = Api({'/zero.png': b'png0', '/a.png': b'shot'})
+        m._write_channel_states(Sync(api), game, local, shot0, overwrite=False)
+        check('lost png fetched alone', api.fetched, ['/zero.png'])
+        check('lost png restored', (folder / 'Game.state.png').read_bytes(), b'png0')
+        check('differing state keeps no png', (folder / 'Game.state.auto.png').exists(), False)
+        api.fetched.clear()
+        m._write_channel_states(Sync(api), game, local, shot0, overwrite=False)
+        check('present png not refetched', api.fetched, [])
+
 
 def test_channel_download_order():
     with tempfile.TemporaryDirectory() as d:

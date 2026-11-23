@@ -17099,8 +17099,15 @@ class AutoSyncManager:
             if not suffix or not (remote or {}).get('download_path'):
                 continue
             local = have.get(slot)
+            shot_path = ((remote.get('screenshot') or {}).get('download_path'))
             if local is not None and (not overwrite
                                       or local.content_hash == remote.get('content_hash')):
+                # Same state, lost thumbnail: bring back just the PNG. A local
+                # state that differs keeps its own (or no) thumbnail.
+                png = local.path.with_name(local.path.name + '.png')
+                if (shot_path and local.content_hash == remote.get('content_hash')
+                        and not png.exists()):
+                    self._write_state_png(sync, shot_path, png)
                 continue
             dest = local.path if local is not None else target_dir / f'{stem}{suffix}'
             data = sync.api.download(remote['download_path'])
@@ -17114,18 +17121,22 @@ class AutoSyncManager:
             tmp = dest.with_name(dest.name + '.part')
             tmp.write_bytes(data)
             os.replace(tmp, dest)
-            shot_path = ((remote.get('screenshot') or {}).get('download_path'))
             if shot_path:
-                shot = sync.api.download(shot_path)
-                if shot is not None:
-                    png = dest.with_name(dest.name + '.png')
-                    png_tmp = png.with_name(png.name + '.part')
-                    png_tmp.write_bytes(shot)
-                    os.replace(png_tmp, png)
+                self._write_state_png(sync, shot_path, dest.with_name(dest.name + '.png'))
             written += 1
         if written:
             self.log(f"⬇️ {written} state(s) for {game.get('name') or stem} "
                      f"← {states.core}")
+        return True
+
+    @staticmethod
+    def _write_state_png(sync, shot_path, png):
+        shot = sync.api.download(shot_path)
+        if shot is None:
+            return False
+        tmp = png.with_name(png.name + '.part')
+        tmp.write_bytes(shot)
+        os.replace(tmp, png)
         return True
 
     def run_negotiated_save_sync(self, conflict_resolver=None, trigger="", only_rom_id=None):
