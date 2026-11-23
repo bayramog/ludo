@@ -48,11 +48,6 @@ def test_revoke_hits_own_token():
     assert not c.revoke_client_token('')
 
 
-class _Settings(dict):
-    def get(self, section, key, default=''):
-        return dict.get(self, (section, key), default)
-
-
 class _Client:
     client_token = 'rmm_old'
 
@@ -64,23 +59,11 @@ class _Client:
         return True
 
 
-def _backend(client):
-    b = LudoBackend.__new__(LudoBackend)
-    b._romm_client = client
-    return b
-
-
-def test_backend_revokes_recorded_id():
+def test_backend_revokes_through_the_retired_client():
     client = _Client()
-    s = _Settings({('RomM', 'client_token'): 'rmm_old', ('RomM', 'client_token_id'): '57'})
-    assert asyncio.run(_backend(client)._revoke_paired_token(s))
+    assert asyncio.run(LudoBackend._revoke_token(client, '57'))
     assert client.revoked == ['57']
 
 
-def test_backend_skips_without_id_or_client():
-    client = _Client()
-    s = _Settings({('RomM', 'client_token'): 'rmm_old'})
-    assert not asyncio.run(_backend(client)._revoke_paired_token(s))
-    assert client.revoked == []
-    s = _Settings({('RomM', 'client_token'): 'rmm_old', ('RomM', 'client_token_id'): '57'})
-    assert not asyncio.run(_backend(None)._revoke_paired_token(s))
+def test_backend_skips_without_client():
+    assert not asyncio.run(LudoBackend._revoke_token(None, '57'))

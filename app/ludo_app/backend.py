@@ -6158,8 +6158,14 @@ class LudoBackend:
             if not SYNC_CORE_AVAILABLE:
                 return {'success': False, 'error': 'sync_core not available'}
 
-            # Before anything below drops the client or the settings it needs.
-            await self._revoke_paired_token(SettingsManager())
+            # Captured before anything below drops the client or its settings;
+            # revoked once sync has stopped, so no running request hits a 401.
+            pre = SettingsManager()
+            retired = None
+            if pre.get('RomM', 'client_token', ''):
+                old_id = (pre.get('RomM', 'client_token_id', '') or '').strip()
+                if old_id:
+                    retired = (self._romm_client, old_id)
 
             result = {'success': True, 'deleted_roms': 0, 'deleted_bios': 0}
             if wipe_data:
@@ -6168,6 +6174,8 @@ class LudoBackend:
                 result = await self.reset_all_settings()
             else:
                 self._stop_sync()
+            if retired:
+                await self._revoke_token(*retired)
 
             settings = SettingsManager()
             # Clear credentials so configured == False. Keep url/username so the
@@ -6198,18 +6206,14 @@ class LudoBackend:
             logging.error(f"logout error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
 
-    async def _revoke_paired_token(self, settings):
-        """Revoke this install's Client API Token on the server, best effort.
+    @staticmethod
+    async def _revoke_token(client, token_id):
+        """Revoke ``token_id`` through ``client``, which signs in with it.
 
-        Without it every re-pair left the old token valid on the server.
-        Only tokens paired since the id was recorded can be revoked; older
-        installs and password sign-ins have no id and are left alone. Never
-        blocks log out: offline or a failed call just logs.
+        Best effort, never blocking log out or re-pair: offline or a failed
+        call just logs. Installs paired before token ids were recorded have
+        none, and their token is left alone.
         """
-        token_id = (settings.get('RomM', 'client_token_id', '') or '').strip()
-        client = self._romm_client
-        if not token_id or not settings.get('RomM', 'client_token', ''):
-            return False
         if not (client and getattr(client, 'client_token', None)):
             logging.info("[AUTH] not connected; client token left on the server")
             return False
@@ -6728,12 +6732,15 @@ class LudoBackend:
                      or (settings.get('RomM', 'username')
                          and settings.get('RomM', 'password')))
                 and not ds_before.get('needs_onboarding'))
-            # A re-pair replaces the token; retire the one it replaces so
-            # re-pairing doesn't leave a live token behind each time.
-            if (settings.get('RomM', 'client_token', '') not in ('', token)
-                    and (settings.get('RomM', 'url', '') or '').rstrip('/') == url.rstrip('/')
-                    and (settings.get('RomM', 'client_token_id', '') or '') != str(token_id or '')):
-                await self._revoke_paired_token(settings)
+            # A re-pair replaces the token; the one it replaces is revoked
+            # below, once sync has stopped using it, so re-pairing doesn't
+            # leave a live token behind each time.
+            retired = None
+            old_id = (settings.get('RomM', 'client_token_id', '') or '').strip()
+            if (old_id and old_id != str(token_id or '')
+                    and settings.get('RomM', 'client_token', '') not in ('', token)
+                    and (settings.get('RomM', 'url', '') or '').rstrip('/') == url.rstrip('/')):
+                retired = (self._romm_client, old_id)
             settings.set('RomM', 'url', url)
             settings.set('RomM', 'client_token', token)
             # Always overwrite: a stale id from the previous pairing would
@@ -6755,6 +6762,8 @@ class LudoBackend:
             # route for password auth; pairing was the odd one out.
             self._stop_sync()
             await asyncio.sleep(0.5)
+            if retired:
+                await self._revoke_token(*retired)
             # A paired token can be a different account than the one the
             # cached /api/users/me answer describes.
             self._invalidate_account_user_cache()

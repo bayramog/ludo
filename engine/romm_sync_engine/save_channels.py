@@ -151,7 +151,8 @@ class ChannelState:
     by_choice: bool = False
     # The held snapshot's states bank, {core: {slot: content_hash}}: what
     # tells a state played on here from one that is already on the server.
-    held_states: dict = field(default_factory=dict)
+    # None for an entry held before states were banked: unknown, not empty.
+    held_states: Optional[dict] = None
 
     def held_point(self):
         if self.held_snapshot_id is None:
@@ -623,6 +624,11 @@ class ChannelSync:
             held = state.held_point()
         current_snap = (channel or {}).get('current')
         moved = held is not None and states_dirty(state.held_states, states)
+        if moved and state.held_states is None:
+            # Held before states were banked, so nothing says which local
+            # state is new. Bank them only while the channel hasn't moved;
+            # once it has, take the download rather than invent a conflict.
+            moved = held.id == (current_snap or {}).get('id')
         action = decide(held, snapshot_point(current_snap), local, states_dirty=moved)
         logging.info(f"[CHANNELS] file={rom_file_id} channel="
                      f"{(channel or {}).get('label')}/{(channel or {}).get('id')} "
@@ -632,7 +638,11 @@ class ChannelSync:
                      f"{' (changed)' if moved else ''} -> {action.kind}")
 
         if action.kind == 'nothing':
-            return ChannelOutcome('up_to_date', channel=channel)
+            # The held snapshot rides along only when it is the current one,
+            # whose states the channel lists: the caller refills from it.
+            in_step = held is not None and held.id == (current_snap or {}).get('id')
+            return ChannelOutcome('up_to_date', channel=channel,
+                                  snapshot=current_snap if in_step else None)
         if action.kind == 'adopt':
             snap = self.api.get_snapshot(action.snapshot_id, hold=True) or current_snap
             self.store.hold(rom_file_id, channel['id'], channel.get('label'), snap)

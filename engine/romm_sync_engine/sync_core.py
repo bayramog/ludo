@@ -2756,8 +2756,10 @@ def server_version_at_least(version, wanted):
 # here, at the one place a limit turns into a request, rather than in each
 # caller's judgement.
 #
-# 250 is above LIBRARY_PAGE_SIZE (so it never interferes with the paged walk)
-# and still under the measured cliff at ~3.3MB. It is a backstop, not a
+# 250 is above LIBRARY_PAGE_SIZE and still under the measured cliff at
+# ~3.3MB. The paged walk must not go through it: on RomM 5.5 it pages by
+# LIBRARY_PAGE_SIZE_5_5 (500), where the cliff is gone, so a clamp to 250
+# there would silently skip half of every page. It is a backstop, not a
 # recommendation: code that wants many rows should page, not raise this.
 MAX_ROMS_REQUEST_LIMIT = 250
 
@@ -14322,7 +14324,7 @@ class AutoSyncManager:
             elif 'state' in file_path.suffix.lower() or file_path.name.lower().endswith('.state.auto'):
                 # ".state.auto" has suffix ".auto" (no "state"), so match by name too.
                 save_type = 'states'
-                if rom_id in self.__dict__.get('_channel_state_roms', ()):
+                if self._state_in_channel(rom_id, file_path):
                     # This game's states go up inside its channel snapshots,
                     # with its save, as Argosy's do: hand over to the session
                     # sync the way a save does.
@@ -14369,11 +14371,17 @@ class AutoSyncManager:
                 # user instead of reporting a failure.
                 self.log(f"📴 Offline — {file_path.name} will sync on next connection")
                 self.retroarch.send_notification("Offline — save will upload on next connection")
+            elif result == 'channel_held' and not self._state_in_channel(rom_id, file_path):
+                # Held by a channel snapshot, but no channel sync here scans
+                # this file (the game has no save to carry it, or it sits in
+                # another core's folder). Leave it pending rather than mark it
+                # synced: marking it would drop it for good.
+                self.log(f"⚠️ {file_path.name} is held by a sync channel this "
+                         f"device can't push it to yet — kept pending")
             elif result == 'channel_held':
                 # Another client (Argosy, or this one before) put this file in
                 # a channel snapshot. The local copy is the newer one: it goes
                 # up with the next channel sync, never replaced by the server's.
-                self.__dict__.setdefault('_channel_state_roms', set()).add(rom_id)
                 self.last_uploaded[str(file_path)] = current_fingerprint
                 self._save_upload_fingerprints()
                 self.log(f"🔗 {file_path.name} belongs to a sync channel — "
@@ -16904,7 +16912,11 @@ class AutoSyncManager:
             if states is not None:
                 # From here this game's states go up inside its snapshots;
                 # the legacy upload would answer 409 for any a snapshot holds.
-                self.__dict__.setdefault('_channel_state_roms', set()).add(rom_id)
+                # Only the folder _channel_states scans: a state elsewhere (another
+                # core's) can't ride this game's snapshots and keeps the legacy path.
+                if states.folder:
+                    self.__dict__.setdefault('_channel_state_dirs', {}).setdefault(
+                        rom_id, set()).add(str(Path(states.folder).resolve()))
             try:
                 out = sync.sync(
                     rom_file['id'],
@@ -16921,9 +16933,11 @@ class AutoSyncManager:
                     # In step with the channel, but a slot it banks may be
                     # missing here (a new device, a cleared folder): refill
                     # those, never overwriting a state on disk.
-                    snap = out.snapshot or (out.channel or {}).get('current')
-                    self._write_channel_states(sync, game, states, snap,
-                                               overwrite=False)
+                    # Only from the snapshot this device holds: a pinned older
+                    # snapshot must not be filled with the current one's slots.
+                    if out.snapshot:
+                        self._write_channel_states(sync, game, states, out.snapshot,
+                                                   overwrite=False)
             except Exception as e:
                 self.log(f"❌ Channel sync for {path.name} failed: {e}")
                 summary['errors'] += 1
@@ -16973,6 +16987,17 @@ class AutoSyncManager:
             self._save_upload_fingerprints()
         return keys, errored
 
+    def _state_in_channel(self, rom_id, file_path):
+        """Does a channel sync bank this state file with its game's snapshots?
+        Only states in the folder it scans do."""
+        dirs = self.__dict__.get('_channel_state_dirs', {}).get(rom_id)
+        if not dirs:
+            return False
+        try:
+            return str(Path(file_path).parent.resolve()) in dirs
+        except OSError:
+            return False
+
     def _write_channel_download(self, sync, rom_file_id, path, out, game=None,
                                 states=None):
         """Write a channel's current save over the local one, in place.
@@ -16982,17 +17007,27 @@ class AutoSyncManager:
         A local copy holding work the server lacks is kept beside it first.
         """
         save = (out.snapshot or {}).get('save')
-        if not save:
-            # A snapshot of states only: no save to write.
-            return save_channels.ChannelOutcome('up_to_date', channel=out.channel)
+        data = None
+        if save:
+            # Fetched before any state is written: a save that fails to
+            # download after its states landed would leave states newer than
+            # the held bank, read next sync as local play (a false conflict).
+            data = sync.api.save_content(save['id'])
+            if data is None:
+                return save_channels.ChannelOutcome('failed', reason='download failed')
         if states is not None and not self._write_channel_states(
                 sync, game, states, out.snapshot, overwrite=True, backup=out.backup):
-            # States first: a save written without its states would be held
-            # as applied, and the missing states never fetched again.
+            # States before the save is held: a save held without its states
+            # would never fetch the missing ones again.
             return save_channels.ChannelOutcome('failed', reason='state download failed')
-        data = sync.api.save_content(save['id'])
-        if data is None:
-            return save_channels.ChannelOutcome('failed', reason='download failed')
+        if not save:
+            # A snapshot of states only (another client may push one): its
+            # states are written above, the local save stays as it is.
+            if states is None:
+                return save_channels.ChannelOutcome('up_to_date', channel=out.channel)
+            sync.finish_download(rom_file_id, out.channel, out.snapshot)
+            return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
+                                                channel=out.channel)
         if out.backup and path.exists():
             stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
             shutil.copy2(path, path.with_suffix(path.suffix + f".local-{stamp}"))
@@ -17261,6 +17296,13 @@ class AutoSyncManager:
                             _bump(rom_id, 'up')
                             if self._record_synced(entry['_path']):
                                 _fp_dirty = True
+                        elif ok == 'channel_held':
+                            # A channel snapshot holds this slot (RomM 5.5); only
+                            # the autosave goes up through channels here. Not an
+                            # error, and not synced either: it stays pending.
+                            summary['channel_held'] = summary.get('channel_held', 0) + 1
+                            self.log(f"🔗 {Path(entry['_path']).name} is held by a "
+                                     f"sync channel — left as it is")
                         elif ok == 'rom_gone':
                             # The ROM was deleted on the server. Flag it via
                             # the backend so the entry goes orphaned — the next

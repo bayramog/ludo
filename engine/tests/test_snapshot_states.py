@@ -144,6 +144,57 @@ def test_scan_and_write():
                                       overwrite=True), False)
 
 
+def test_channel_download_order():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        info = root / 'info'
+        info.mkdir()
+        (info / 'mgba_libretro.info').write_text('corename = "mGBA"\n')
+        folder = root / 'states' / 'mGBA'
+        folder.mkdir(parents=True)
+        m = _manager(root / 'states', info)
+        game = {'rom_id': 1, 'name': 'Game', 'local_path': str(root / 'roms' / 'Game.gba')}
+        local = m._channel_states(game, 'mgba')
+        save = root / 'Game.srm'
+        save.write_bytes(b'old save')
+        bank = {'mgba': {'1': {'content_hash': 'n', 'download_path': '/one'}}}
+
+        class DlApi(Api):
+            def __init__(self, blobs, save_bytes):
+                super().__init__(blobs)
+                self.save_bytes = save_bytes
+
+            def save_content(self, sid):
+                return self.save_bytes
+
+        class DlSync(Sync):
+            held = None
+
+            def finish_download(self, rom_file_id, channel, snapshot):
+                DlSync.held = snapshot['id']
+
+        out = save_channels.ChannelOutcome('download', snapshot={'id': 9, 'save': {'id': 90},
+                                                                 'states': bank})
+        api = DlApi({'/one': b'one'}, None)
+        res = m._write_channel_download(DlSync(api), 5, save, out, game=game, states=local)
+        check('failed save download', res.kind, 'failed')
+        check('no state written before the save is in hand', (folder / 'Game (Track 1).state1').exists(), False)
+
+        out = save_channels.ChannelOutcome('download', snapshot={'id': 8, 'states': bank})
+        res = m._write_channel_download(DlSync(DlApi({'/one': b'one'}, None)), 5, save, out,
+                                        game=game, states=local)
+        check('states-only snapshot downloads', res.kind, 'downloaded')
+        check('its states land', (folder / 'Game (Track 1).state1').read_bytes(), b'one')
+        check('and it is held', DlSync.held, 8)
+        check('local save untouched', save.read_bytes(), b'old save')
+
+        m._channel_state_dirs = {1: {str(folder.resolve())}}
+        check('state in the scanned folder diverts', m._state_in_channel(1, folder / 'Game.state3'), True)
+        check('another core keeps the legacy path',
+              m._state_in_channel(1, root / 'states' / 'gpSP' / 'Game.state3'), False)
+        check('another game keeps the legacy path', m._state_in_channel(2, folder / 'X.state'), False)
+
+
 def test_held_by_channel():
     class R:
         def __init__(self, body, text=''):
@@ -162,6 +213,7 @@ def test_held_by_channel():
 def main():
     test_core_library_id()
     test_scan_and_write()
+    test_channel_download_order()
     test_held_by_channel()
     print()
     if FAILURES:

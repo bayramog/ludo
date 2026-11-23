@@ -297,6 +297,35 @@ def test_states():
                         'current': _snap_states(5, 'mine', {'mgba': {'auto': 'a2', '1': 's1'}})}])
         check('then in step', ChannelSync(api, store).sync(7, mine, unit, states=local).kind, 'up_to_date')
 
+        # The refill source: the held snapshot only while it is the current.
+        out = ChannelSync(api, store).sync(7, mine, unit, states=LocalStates('mgba'))
+        check('in step carries the held snapshot', (out.snapshot or {}).get('id'), 5)
+        store.hold(7, 'c1', 'default', _snap_states(3, 'mine', {'mgba': {'auto': 'old'}}),
+                   by_choice=True)
+        api = FakeApi([{'id': 'c1', 'label': 'default',
+                        'current': _snap_states(5, 'mine', {'mgba': {'auto': 'a2'}})}])
+        out = ChannelSync(api, store).sync(7, mine, unit, states=LocalStates('mgba'))
+        check('pinned older snapshot stays', out.kind, 'up_to_date')
+        check('pinned older snapshot refills nothing', out.snapshot, None)
+
+    # An entry held before states were banked: its bank is unknown.
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / 's.json'
+        path.write_text('{"7": {"channel_id": "c1", "label": "default", '
+                        '"held_snapshot_id": 4, "held_content_hash": "mine", '
+                        '"held_identity_hash": "mine"}}')
+        check('old entry loads unknown', ChannelStore(path).get(7).held_states, None)
+        mine = SaveHashes('mine', 'mine')
+        unit = lambda: SaveUnit(b'x', 'g.srm', 'mine', 'mine')  # noqa: E731
+        api = FakeApi([{'id': 'c1', 'label': 'default',
+                        'current': _snap_states(5, 'theirs', {'mgba': {'auto': 'b'}})}])
+        out = ChannelSync(api, ChannelStore(path)).sync(7, mine, unit, states=local)
+        check('old entry + moved channel downloads, no false conflict', out.kind, 'download')
+        api = FakeApi([{'id': 'c1', 'label': 'default', 'current': _snap_states(4, 'mine', {})}],
+                      [PushResult('written', snapshot=_snap_states(6, 'mine', {'mgba': {'auto': 'a2'}}))])
+        out = ChannelSync(api, ChannelStore(path)).sync(7, mine, unit, states=local)
+        check('old entry in step banks its states', out.kind, 'pushed')
+
 
 def test_state_parts():
     class Resp:
