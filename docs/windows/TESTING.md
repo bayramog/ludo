@@ -71,7 +71,7 @@ typecheck. These browser tests are Linux-hosted; Windows packaged UI acceptance
 remains in [F5-04](https://github.com/bayramog/ludo/issues/243).
 
 The runner's three Bash compatibility/bootstrap tests are POSIX-only and
-visibly skipped on Windows: Windows invokes Python directly. Its other thirty
+visibly skipped on Windows: Windows invokes Python directly. Its other thirty-one
 negative/execution and fixture contracts execute on both OSes. Tracking: [F1-06](https://github.com/bayramog/ludo/issues/11).
 
 ## Isolation and failure evidence
@@ -167,7 +167,11 @@ summaries, no raw logs, JUnit, profiles or synthetic credential values.
 
 Regression evidence first reproduced Windows root leakage and forbidden reads
 while the auto-sync owner held the real lock, then passed after the fixture
-repairs. The 33 runner/fixture contracts also retain the #249 review regressions:
+repairs. The Linux/Python 3.13 run at `5ea3d25` also exposed a PCEE2 fixture
+race: two real `format_card()` calls across a clock tick produced different
+embedded timestamps. A forced-clock-tick regression first failed, then passed
+after fixing only the fixture clock; full byte equality and real formatting are
+still asserted. The 34 runner/fixture contracts also retain the #249 review regressions:
 mixed empty/passing backend selection, parameter/class/unittest file attribution,
 setup-error/skip precedence, CRLF completion markers, synthetic boot identity,
 subprocess/timeout failures and bounded secret-free evidence.

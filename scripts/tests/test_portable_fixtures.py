@@ -1,10 +1,12 @@
 """Regressions for fixtures that previously lost whole Windows suites."""
 import contextlib
+from datetime import datetime, timedelta
 import io
 import os
 from pathlib import Path
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +17,24 @@ import test_play_sessions as sessions
 
 
 class FixtureTests(unittest.TestCase):
+    def test_blank_card_fixture_survives_a_clock_tick(self):
+        import test_pcee2_card as pcee
+
+        class TickingClock(datetime):
+            tick = 0
+
+            @classmethod
+            def now(cls):
+                result = datetime(2026, 9, 15, 12) + timedelta(seconds=cls.tick)
+                cls.tick += 1
+                return result
+
+        pcee.FAILURES.clear()
+        with patch.object(pcee.ps2_memcard, 'datetime', types.SimpleNamespace(datetime=TickingClock)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            pcee.main()
+        self.assertEqual(pcee.FAILURES, [])
+
     def test_autosync_fixture_reads_metadata_only_after_release(self):
         import test_autosync_lock as locks
         owners = []

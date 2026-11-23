@@ -8,10 +8,12 @@ user's own card left alone, a stale link repointed, other cores untouched,
 and the RetroDECK 0.11 layout (memcards inside the saves tree) not reporting
 the same card twice.
 """
+from datetime import datetime
 import sys
 import tempfile
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -21,6 +23,12 @@ from romm_sync_engine import ps2_memcard  # noqa: E402
 from romm_sync_engine.sync_core import RetroArchInterface as RA  # noqa: E402
 
 FAILURES = []
+
+
+class CardClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 9, 15, 12, tzinfo=tz)
 
 
 def check(label, got, want):
@@ -53,7 +61,10 @@ def opts(root, stem):
 
 
 def main():
-    with tempfile.TemporaryDirectory() as tmp:
+    # format_card stores wall-clock timestamps. Keep both real formatter calls
+    # in the same fixture instant so the byte equality is stable across a tick.
+    with tempfile.TemporaryDirectory() as tmp, patch.object(
+            ps2_memcard, 'datetime', types.SimpleNamespace(datetime=CardClock)):
         root = Path(tmp)
         rom = root / 'roms' / 'ps2' / 'Game (USA).iso'
         rom.parent.mkdir(parents=True)
