@@ -47,18 +47,6 @@ class ModPackages(unittest.TestCase):
         self.assertFalse((self.root / MOD).exists())
         self.assertFalse((self.root / CONFIG).exists())
 
-    def test_shared_path_conformance(self):
-        fixture = Path(__file__).parent / 'fixtures/switch-mod-paths.tsv'
-        for line in fixture.read_text().splitlines():
-            expected, name = line.split('\t')
-            with self.subTest(name=name):
-                if expected == 'reject':
-                    with self.assertRaises(M.ModError):
-                        M._target(name, TITLE)
-                else:
-                    target = M._target(name, TITLE)
-                    self.assertEqual(target is not None, expected == 'install')
-
     def test_invalid_paths_reject_entire_package_before_writing(self):
         for name in ('../escape', '/absolute', 'load//bad', 'load/../bad',
                      'load\\bad', 'load/C:/bad', 'load/bad./file',

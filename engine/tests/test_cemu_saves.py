@@ -167,8 +167,11 @@ def test_active(tmp):
 def test_installs(tmp):
     import os
     home = tmp / 'home'
-    old = {k: os.environ.get(k) for k in ('HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME')}
-    os.environ['HOME'] = str(home)
+    old = {k: os.environ.get(k) for k in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+                                                       'XDG_CONFIG_HOME', 'XDG_DATA_HOME')}
+    os.environ.update(HOME=str(home), USERPROFILE=str(home),
+                      APPDATA=str(home / 'AppData/Roaming'),
+                      LOCALAPPDATA=str(home / 'AppData/Local'))
     os.environ.pop('XDG_CONFIG_HOME', None)
     os.environ.pop('XDG_DATA_HOME', None)
     try:

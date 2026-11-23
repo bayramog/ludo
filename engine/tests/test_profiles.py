@@ -35,7 +35,10 @@ class ProfilesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
-        self.env = patch.dict(os.environ, {'HOME': self.tmp.name}, clear=False)
+        self.state_root = self.home / ('AppData/Local/ludo' if os.name == 'nt' else '.config/ludo')
+        self.env = patch.dict(os.environ, {'HOME': self.tmp.name, 'USERPROFILE': self.tmp.name,
+            'APPDATA': str(self.home / 'AppData/Roaming'),
+            'LOCALAPPDATA': str(self.home / 'AppData/Local')}, clear=False)
         self.env.start()
         for k in ('SteamAppUser', 'SteamUser', 'SteamClientLaunch', 'LUDO_PROFILE'):
             os.environ.pop(k, None)
@@ -55,8 +58,8 @@ class ProfilesTest(unittest.TestCase):
         return P.resolve(env.pop('requested', None), env=env)
 
     def test_default_profile_is_the_existing_state_directory(self):
-        self.assertEqual(paths.config_dir(), self.home / '.config/ludo')
-        self.assertEqual(paths.cache_dir(), self.home / '.config/ludo/cache')
+        self.assertEqual(paths.config_dir(), self.state_root)
+        self.assertEqual(paths.cache_dir(), self.state_root / 'cache')
         self.assertIsNone(P.save_dirs(P.DEFAULT))
         self.assertEqual(self.launch(), {'id': P.DEFAULT, 'steam': None, 'ask': False})
 
@@ -64,9 +67,9 @@ class ProfilesTest(unittest.TestCase):
         pid = P.create('Mia')
         paths._locked, paths._profile_locked, paths._profile = False, False, P.DEFAULT
         paths.set_profile(pid)
-        self.assertEqual(paths.config_dir(), self.home / '.config/ludo/profiles' / pid)
-        self.assertEqual(paths.cache_dir(), self.home / '.config/ludo/profiles' / pid / 'cache')
-        self.assertEqual(paths.machine_cache_dir(), self.home / '.config/ludo/cache')
+        self.assertEqual(paths.config_dir(), self.state_root / 'profiles' / pid)
+        self.assertEqual(paths.cache_dir(), self.state_root / 'profiles' / pid / 'cache')
+        self.assertEqual(paths.machine_cache_dir(), self.state_root / 'cache')
         self.assertEqual(P.save_dirs(pid)['saves'], self.home / 'Ludo/profiles' / pid / 'saves')
 
     def test_new_profile_copies_machine_settings_but_not_the_sign_in(self):
@@ -221,7 +224,8 @@ class ProfilesTest(unittest.TestCase):
     def make_ra(self):
         from romm_sync_engine.sync_core import RetroArchInterface
         flatpak = 'org.libretro.RetroArch'
-        cfg_dir = self.home / '.var/app' / flatpak / 'config/retroarch'
+        cfg_dir = (self.home / 'RetroArch' if os.name == 'nt' else
+                   self.home / '.var/app' / flatpak / 'config/retroarch')
         cfg_dir.mkdir(parents=True)
         (cfg_dir / 'retroarch.cfg').write_text('savefile_directory = "~/Ludo/saves"\n'
                                                'savestate_directory = "~/Ludo/states"\n')
@@ -229,7 +233,12 @@ class ProfilesTest(unittest.TestCase):
         ra.settings = type('S', (), {'get': lambda self, s, k, d='': d})()
         ra._is_retrodeck_cache = None
         ra.is_retrodeck_installation = lambda: False
-        ra.retroarch_executable = f'flatpak run {flatpak}'
+        if os.name == 'nt':
+            exe = cfg_dir / 'retroarch.exe'
+            exe.touch()
+            ra.retroarch_executable = str(exe)
+        else:
+            ra.retroarch_executable = f'flatpak run {flatpak}'
         ra.flatpak_app_installed = lambda app_id: app_id == flatpak
         return ra, cfg_dir
 

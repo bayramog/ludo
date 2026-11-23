@@ -7,9 +7,7 @@
       "test_auth_and_rejects.py",
       "test_autosync_lock.py",
       "test_batch_regressions.py",
-      "test_bios_folder.py",
       "test_bios_readiness.py",
-      "test_bios_readiness_sigil.py",
       "test_bios_readiness_symlinks.py",
       "test_cemu_saves.py",
       "test_cemu_standalone.py",
@@ -27,13 +25,11 @@
       "test_document_files.py",
       "test_download_resume.py",
       "test_download_target_sorting.py",
-      "test_dreamcast_sync.py",
       "test_eden_addons.py",
       "test_eden_config.py",
       "test_eden_restore.py",
       "test_eden_users.py",
       "test_emulator_saves.py",
-      "test_emulator_saves_process.py",
       "test_fetch_abandon.py",
       "test_firmware.py",
       "test_firmware_download.py",
@@ -46,14 +42,12 @@
       "test_keys.py",
       "test_keys_sync.py",
       "test_latest_state_shared_folder.py",
-      "test_launch_core_dir.py",
       "test_no_file_grouping.py",
       "test_orphan_skip.py",
       "test_pcee2_card.py",
       "test_physical_games.py",
       "test_platform_launch_regressions.py",
       "test_play_sessions.py",
-      "test_play_sessions_linux_boot.py",
       "test_playlist_monitoring.py",
       "test_process_lock.py",
       "test_profiles.py",
@@ -73,19 +67,61 @@
       "test_standalone_download_guard.py",
       "test_state_folder_names.py",
       "test_switch_content.py",
-      "test_switch_content_sigil.py",
-      "test_switch_mods.py",
+      "test_switch_mod_paths.py",
       "test_switch_mods_import.py",
-      "test_switch_nsz.py",
       "test_switch_nsz_contracts.py",
       "test_switch_sibling_attribution.py",
       "test_title_ids.py",
-      "test_title_ids_sigil.py",
       "test_toast_flush.py",
       "test_windows_paths.py",
       "test_zip_bad_extra.py"
     ],
-    "windows_exclusions": {}
+    "windows_exclusions": {
+      "test_bios_folder.py": {
+        "reason": "Flatpak RetroArch config/first-launch fixture; Windows deliberately bypasses _unconfigured_tree and uses different install discovery.",
+        "issue": "https://github.com/bayramog/ludo/issues/9"
+      },
+      "test_bios_readiness_sigil.py": {
+        "reason": "Real disc serial/region priority requires the bundled native Sigil library; portable BIOS readiness and fallback contracts run separately.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_cemu_appimage_permissions.py": {
+        "reason": "Measured Windows failure: chmod does not set the POSIX owner executable bit. Exact upstream chmod assertions remain on Linux; all other Cemu discovery/audio/argv fixtures run on both OSes without executing Cemu.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
+      "test_dreamcast_sync.py": {
+        "reason": "Product-number-derived VMU names require Sigil disc identification; the shipped Linux shared library cannot load on Windows.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_emulator_saves_process.py": {
+        "reason": "Live emulator ownership fixture executes a POSIX shell script and reads /proc PID status; needs native Windows process identity support.",
+        "issue": "https://github.com/bayramog/ludo/issues/10"
+      },
+      "test_launch_core_dir.py": {
+        "reason": "Windows drive paths are stripped by the existing RetroArch :/ placeholder normalization, causing redundant core directory overrides; also includes Linux /usr/lib64 discovery.",
+        "issue": "https://github.com/bayramog/ludo/issues/16"
+      },
+      "test_play_sessions_linux_boot.py": {
+        "reason": "Real Linux /proc boot identity is checked independently from portable synthetic recovery; Windows native boot identity remains F1-03.",
+        "issue": "https://github.com/bayramog/ludo/issues/10"
+      },
+      "test_switch_content_sigil.py": {
+        "reason": "Explicitly asserts the shipped Sigil library loads without an override; Windows Sigil binary is not bundled yet.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_switch_mods.py": {
+        "reason": "Measured Windows ModuleNotFoundError: the 23 real mod install/recovery/removal transaction cases lazily import fcntl. Shared path conformance and missing-fcntl import/feature boundary run separately.",
+        "issue": "https://github.com/bayramog/ludo/issues/7"
+      },
+      "test_switch_nsz.py": {
+        "reason": "Actual compressed-container round trips require libzstd/libcrypto; both are unavailable through the current Windows native loader.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      },
+      "test_title_ids_sigil.py": {
+        "reason": "Bundled Sigil and real disc/title-ID extraction are unavailable on Windows until native dependencies are supplied.",
+        "issue": "https://github.com/bayramog/ludo/issues/8"
+      }
+    }
   },
   "app": {
     "portable": [
@@ -113,6 +149,11 @@
       "test_variant_own_id.py",
       "test_wiiu_launch_path.py"
     ],
-    "windows_exclusions": {}
+    "windows_exclusions": {
+      "test_mod_packages_transactions.py": {
+        "reason": "One real download/install/remove case enters the fcntl-backed mod transaction and fails on Windows. The other six backend mod cases stay selected; engine path and missing-fcntl contracts also run.",
+        "issue": "https://github.com/bayramog/ludo/issues/7"
+      }
+    }
   }
 }

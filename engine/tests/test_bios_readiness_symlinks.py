@@ -21,7 +21,7 @@ def main():
     ra.save_dirs = {'saves': saves_root}
     seen = sorted(f['relative_path'] for f in ra.get_save_files()['saves'])
     check('the deep memory card is discovered',
-          any(r.endswith('memcards/Mcd001.ps2') for r in seen), True)
+          any(r.endswith(str(Path('memcards') / 'Mcd001.ps2')) for r in seen), True)
     check('ordinary saves still found',
           any(r.endswith('Game (Europe).srm') for r in seen), True)
     # Followed through the symlink, but the same real file is not listed twice.
@@ -43,7 +43,7 @@ def main():
             Path.iterdir = real_iterdir
         card = [r for r in paths if r.endswith('Mcd001.ps2')]
         check(f'the card is found under its real path ({label})',
-              card, ['ps2/retroarch-core/LRPS2/memcards/Mcd001.ps2'])
+              card, [str(Path('ps2/retroarch-core/LRPS2/memcards/Mcd001.ps2'))])
 
     # A save folder pointed somewhere enormous must not be walked forever.
     depth_root = Path(tempfile.mkdtemp())

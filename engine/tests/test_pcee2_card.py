@@ -116,7 +116,7 @@ def main():
         ra = fake_ra(root, system)
         ra._ensure_pcee2_card(str(rom), '/cores/pcee2_libretro.so')
         found = [e['relative_path'] for e in ra.get_save_files()['saves']]
-        check('the card is reported once, under its real path', found, ['ps2/Game (USA).ps2'])
+        check('the card is reported once, under its real path', found, [str(Path('ps2') / 'Game (USA).ps2')])
 
     if FAILURES:
         print(f"\nFAILED: {', '.join(FAILURES)}")

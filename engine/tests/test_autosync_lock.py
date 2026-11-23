@@ -7,9 +7,11 @@ file while the owner still held the old one: two auto-syncs at once. flock
 contends between separate opens in one process, so three instances here
 stand in for three processes.
 """
+import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -36,17 +38,24 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'autosync.lock'
         a, b, c = lock_at(path), lock_at(path), lock_at(path)
-        check('owner acquires', a.acquire('A'), True)
-        owner_info = path.read_text()
-        check('a second process is refused', b.acquire('B'), False)
-        check("the loser leaves the owner's details", path.read_text(), owner_info)
-        b.release()
-        check('the loser releasing keeps the file', path.exists(), True)
-        check('a third process is still refused', c.acquire('C'), False)
-        check('the loser restarting is still refused', b.acquire('B'), False)
-        a.release()
-        check('after the owner leaves, the next one gets it', c.acquire('C'), True)
-        c.release()
+        try:
+            # A native Windows byte lock prevents reads through another handle.
+            # Freeze only the metadata clock so we can verify it after release,
+            # without changing the real ownership/contender behavior on either OS.
+            with patch('romm_sync_engine.sync_core.time.time', return_value=1234.5):
+                check('owner acquires', a.acquire('A'), True)
+            owner_info = f'{os.getpid()}:A:1234.5\n'
+            check('a second process is refused', b.acquire('B'), False)
+            b.release()
+            check('the loser releasing keeps the file', path.exists(), True)
+            check('a third process is still refused', c.acquire('C'), False)
+            check('the loser restarting is still refused', b.acquire('B'), False)
+            a.release()
+            check("the loser leaves the owner's details", path.read_text(), owner_info)
+            check('after the owner leaves, the next one gets it', c.acquire('C'), True)
+        finally:
+            for lock in (a, b, c):
+                lock.release()
     if FAILURES:
         print(f"\nFAILED: {', '.join(FAILURES)}")
         sys.exit(1)

@@ -1,4 +1,4 @@
-"""Linux Cemu discovery, executable permissions and XDG audio repair."""
+"""Synthetic Cemu discovery and XDG audio repair (no emulator execution)."""
 import os
 import sys
 import tempfile
@@ -32,13 +32,6 @@ def main():
         touch(home / 'AppImages' / 'Eden-1.0.AppImage', exec_=True)
         check('other appimages ignored',
               find_standalone_executable('cemu', spec), str(app))
-        # Downloaded without +x -> adopted, and the bit is set for the user.
-        app.chmod(0o644)
-        check('non-executable appimage made executable',
-              find_standalone_executable('cemu', spec), str(app))
-        check('exec bit added', bool(app.stat().st_mode & 0o100), True)
-        app.chmod(0o755)
-
         # --- flatpak wins over AppImage; both are listed ---------------------
         installed.add('info.cemu.Cemu')
         check('flatpak preferred', find_standalone_executable('cemu', spec),

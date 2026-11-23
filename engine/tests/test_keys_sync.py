@@ -230,7 +230,10 @@ def legacy_archive_receipt():
     has since gone must not read as "Keys installed": the archive is fetched
     once more and the receipt gains its real file list.
     """
-    with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'HOME': tmp}):
+    with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+            'HOME': tmp, 'USERPROFILE': tmp,
+            'LOCALAPPDATA': str(Path(tmp) / 'AppData/Local'),
+            'APPDATA': str(Path(tmp) / 'AppData/Roaming')}):
         root = Path(tmp)
         keys = root / '.local/share/eden/keys'
         keys.mkdir(parents=True)

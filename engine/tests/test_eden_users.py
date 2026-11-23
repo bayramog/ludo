@@ -38,7 +38,9 @@ class EdenUsersTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
-        self.env = patch.dict(os.environ, {'HOME': self.tmp.name})
+        self.env = patch.dict(os.environ, {'HOME': self.tmp.name, 'USERPROFILE': self.tmp.name,
+            'APPDATA': str(self.home / 'AppData/Roaming'),
+            'LOCALAPPDATA': str(self.home / 'AppData/Local')})
         self.env.start()
         os.environ.pop('EDEN_DATA_DIR', None)
         paths._locked, paths._profile_locked, paths._profile = False, False, P.DEFAULT
