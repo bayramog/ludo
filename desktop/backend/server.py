@@ -31,6 +31,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 _owner_stop = None
 if __name__ == "__main__" and os.name == "nt" and os.environ.pop("LUDO_OWNER_PIPE", None) == "1":
+    # Embedded distributions can ignore PYTHONIOENCODING via their ._pth.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     # An embedded Python's ._pth may omit even the entry script's directory.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from windows_lifetime import watch_owner

@@ -1,5 +1,5 @@
 // Ludo — Electron desktop shell. Linux is what ships; the code below keeps
-// Windows paths working, but no Windows build is produced or tested.
+// Windows backend tested on hosted runners; release packaging is Linux-only.
 //
 // Replaces an earlier GTK3/WebKit2GTK shell. Same lifecycle: spawn the
 // existing Python backend (backend/server.py) on a free localhost port at launch,
@@ -193,10 +193,13 @@ function freePort(host = "127.0.0.1") {
 // user's system Python: it would be missing the engine and the backend deps,
 // and would fail confusingly at import time rather than here.
 function pythonExe() {
-  if (process.env.ROMM_PYTHON && !(PACKAGED && process.platform === "win32")) return process.env.ROMM_PYTHON;
+  const windows = process.platform === "win32";
+  if (process.env.ROMM_PYTHON && (!PACKAGED || !windows)) {
+    return process.env.ROMM_PYTHON;
+  }
 
   if (PACKAGED) {
-    const bundled = process.platform === "win32"
+    const bundled = windows
       ? path.join(RES, "python", "python.exe")
       : path.join(RES, "python", "bin", "python3");
     if (fs.existsSync(bundled)) return bundled;
@@ -204,11 +207,11 @@ function pythonExe() {
       `Bundled Python runtime missing at ${bundled}. The build is incomplete.`);
   }
 
-  const venv = process.platform === "win32"
+  const venv = windows
     ? path.join(DESKTOP_DIR, ".venv", "Scripts", "python.exe")
     : path.join(DESKTOP_DIR, ".venv", "bin", "python");
   if (fs.existsSync(venv)) return venv;
-  return process.platform === "win32" ? "python" : "python3";
+  return windows ? "python" : "python3";
 }
 
 // Mirroring the backend's output is a convenience for terminal launches. When
@@ -698,6 +701,11 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (alreadyQuitting && stopping) return;
     stopBackend().catch(err => console.error("[backend] quit:", err)).finally(() => app.quit());
+  });
+  // process.exit() bypasses Electron's asynchronous quit event. Windows
+  // observes the closed owner pipe; POSIX still gets its synchronous SIGINT.
+  process.once("exit", () => {
+    if (backend && process.platform !== "win32") backend.kill("SIGINT");
   });
   for (const sig of ["SIGTERM", "SIGHUP"]) process.on(sig, () => app.quit());
 }

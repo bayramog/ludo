@@ -180,3 +180,22 @@ Inside `test_batch_regressions.py`, the two POSIX owner-mode assertions only
 execute on POSIX. Windows still executes credential migration/encryption/readback,
 prints the limitation, and retains [F1-01 #6](https://github.com/bayramog/ludo/issues/6)
 for Windows ACL/device acceptance. This is not an ACL verification claim.
+
+### Desktop backend lifecycle (#10)
+
+The native Windows jobs also run the Electron main entry with a test window,
+real Python processes, a temporary profile and an occupied loopback port.
+The development case creates a venv under a spaced Unicode path. The packaged
+layout uses a directory junction to the runner's Python installation. Both
+cases start the real server, create a profile through RPC, restart on the
+same port and verify the new profile before closing the window.
+`desktop/tests/windows_process_tree.py` exercises a child and grandchild,
+owner-pipe EOF, forced exit, a suspended/resumed child and a separately started
+Eden-named fixture. It reads the Windows suspend clock and compares the kernel
+boot identifier across interpreters. The shell contract tests feed a split
+readiness banner and reuse a synthetic PID across two successive child handles.
+
+Windows 11 device sleep/wake, real emulator behavior, console visibility on
+a graphical desktop and an installed or portable Ludo release require separate
+device/package evidence. The hosted tests use a fixture window and interpreter
+layout. The Linux process/zombie and boot-ID tests above continue to run on Linux.

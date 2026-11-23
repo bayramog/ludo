@@ -21,8 +21,13 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
     const packaged = mode !== "development";
     const resources = path.join(root, "resources");
     const desktop = packaged ? path.join(resources, "app-src", "desktop") : path.join(root, "desktop");
-    fs.mkdirSync(desktop, { recursive: true });
-    fs.cpSync(path.join(repo, "desktop", "backend"), path.join(desktop, "backend"), { recursive: true });
+    fs.mkdirSync(path.join(desktop, "backend"), { recursive: true });
+    for (const file of ["server.py", "windows_lifetime.py"]) {
+      const source = path.join(repo, "desktop", "backend", file);
+      const target = path.join(desktop, "backend", file);
+      fs.copyFileSync(source, target);
+      assert.deepEqual(fs.readFileSync(target), fs.readFileSync(source));
+    }
     fs.copyFileSync(path.join(repo, "desktop", "package.json"), path.join(desktop, "package.json"));
     const py = (...args) => execFileSync("python", args, { cwd: repo, encoding: "utf8" }).trim();
     if (packaged) {
@@ -66,19 +71,23 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
       return;
     }
     assert.equal(await startup, "loaded");
-    const rpc = async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api/host_list_dir`, {
-        method: "POST", body: JSON.stringify({ args: [root] }), signal: AbortSignal.timeout(5000),
+    const rpc = async (method, ...args) => {
+      const res = await fetch(`http://127.0.0.1:${port}/api/${method}`, {
+        method: "POST", body: JSON.stringify({ args }), signal: AbortSignal.timeout(5000),
       });
-      assert.equal((await res.json()).result.path, root);
+      const reply = await res.json();
+      assert.ok(!reply.error, reply.error);
+      return reply.result;
     };
-    await rpc();
+    assert.equal((await rpc("get_profiles")).current, "default");
+    const created = await rpc("create_profile", "İzmir 東京");
+    assert.equal(created.status, "reload");
     const reloaded = next(events, "load");
     ipc.emit("romm:reload-backend");
     await reloaded;
     assert.equal(children.length, 2);
     assert.equal(children[0].exitCode, 0, "old backend exited gracefully before rebinding");
-    await rpc();
+    assert.equal((await rpc("get_profiles")).current, created.id);
     const quit = next(events, "quit");
     app.emit("window-all-closed");
     await quit;

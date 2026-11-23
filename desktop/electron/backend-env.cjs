@@ -10,7 +10,7 @@ function backendEnv(baseEnv, host, port, packaged, platform = process.platform) 
     // Environment names on Windows are case insensitive, including in launchers
     // that assembled an ordinary JS object with mixed-case keys.
     for (const key of Object.keys(env)) {
-      if (/^(PYTHON.*|LUDO_OWNER_PIPE|ROMM_HOST|ROMM_PORT)$/i.test(key) ||
+      if (/^(PYTHON.*|__PYVENV_LAUNCHER__|LUDO_OWNER_PIPE|ROMM_HOST|ROMM_PORT)$/i.test(key) ||
           (packaged && /^LUDO_DEBUG$/i.test(key))) delete env[key];
     }
     Object.assign(env, {
