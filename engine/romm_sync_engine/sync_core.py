@@ -6418,10 +6418,12 @@ class RomMClient:
         once it turned out to feed nothing but a log line. Kept because this
         module is shared verbatim with romm-retroarch-sync.
 
-        `device_id` only filters `saves`. /api/states declares no such
-        parameter (measured against 5.3.0, and the same in 5.2.0), and unknown
-        query params are dropped silently, so a states call answers with every
-        state for the scope regardless of the device asked for.
+        `device_id` only filters `saves`. GET /api/states declares no such
+        parameter (measured against 5.3.0 and 5.2.0; 5.5 still takes only
+        rom_id/rom_ids/platform_id), and unknown query params are dropped
+        silently, so a states call answers with every state for the scope
+        regardless of the device asked for. (Since 5.5 POST /api/states does
+        take device_id and stores it as origin_device_id; upload_save sends it.)
 
         Args:
             device_id: The device ID to filter by
@@ -18877,7 +18879,7 @@ class AutoSyncManager:
             # uploaded-by-this-device set (another device may have uploaded a
             # newer version of the same id). The two queries fed nothing but a
             # log line, and the states one could not even answer the question
-            # asked: /api/states takes no device_id, so it returned every state
+            # asked: GET /api/states takes no device_id, so it returned every state
             # for the rom and reported them all as "already on device".
 
             # Get user preference for overwrite behavior
