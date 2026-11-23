@@ -1,10 +1,13 @@
 """Windows integration of job containment, external probes and owner-pipe loss."""
+import faulthandler
 import os
 from pathlib import Path
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -43,18 +46,15 @@ class WindowsProcesses(unittest.TestCase):
     def exercise_tree(self, mode):
         # The leaf inherits membership through the intermediate child. None
         # of these identifiers is used to locate processes for termination.
-        leaf = "import time; time.sleep(90)"
-        middle = ("import subprocess, sys, time; p=subprocess.Popen([sys.executable, '-c', "
-                  + repr(leaf) + "]); print(p.pid, flush=True); time.sleep(90)")
-        owner = ("import subprocess, sys, time; from windows_lifetime import watch_owner; "
-                 "stopping=watch_owner(); p=subprocess.Popen([sys.executable, '-c', "
-                 + repr(middle) + "], stdout=subprocess.PIPE); "
-                 "print(p.pid, p.stdout.readline().decode().strip(), flush=True); "
-                 "stopping.wait(); " + ("time.sleep(90)" if mode == 'owner-eof' else "sys.exit(0)"))
-        with subprocess.Popen([sys.executable, '-c', owner], cwd=BACKEND, stdin=subprocess.PIPE,
+        with subprocess.Popen([sys.executable, __file__, 'owner', mode], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, text=True) as proc:
             try:
-                middle_pid, leaf_pid = map(int, proc.stdout.readline().split())
+                lines = queue.Queue()
+                threading.Thread(target=lambda: lines.put(proc.stdout.readline()),
+                                 daemon=True).start()
+                ready = lines.get(timeout=8)
+                self.assertTrue(ready, 'owner exited before its tree was ready')
+                middle_pid, leaf_pid = map(int, ready.split())
                 descendants = [psutil.Process(pid) for pid in (middle_pid, leaf_pid)]
                 # Pause and resume a real contained process without changing ownership.
                 descendants[0].suspend()
@@ -76,5 +76,30 @@ class WindowsProcesses(unittest.TestCase):
                     proc.kill()
 
 
+def fixture_process(role):
+    if role == 'owner':
+        sys.path.insert(0, str(BACKEND))
+        from windows_lifetime import watch_owner
+        stopping = watch_owner()
+        middle = subprocess.Popen([sys.executable, __file__, 'middle'], stdout=subprocess.PIPE)
+        print(middle.pid, middle.stdout.readline().decode().strip(), flush=True)
+        stopping.wait()
+        if sys.argv[2] == 'owner-eof':
+            time.sleep(90)  # exercise the backend watchdog
+    elif role == 'middle':
+        # Old POSIX launch contract: helper stdin is empty. The Windows
+        # backend has a control pipe, but it must keep that pipe private.
+        assert sys.stdin.buffer.read(1) == b''
+        leaf = subprocess.Popen([sys.executable, __file__, 'leaf'])
+        print(leaf.pid, flush=True)
+        time.sleep(90)
+    else:
+        time.sleep(90)
+
+
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    if len(sys.argv) > 1:
+        fixture_process(sys.argv[1])
+    else:
+        faulthandler.dump_traceback_later(60, exit=True)
+        unittest.main(verbosity=2)

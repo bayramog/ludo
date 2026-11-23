@@ -55,12 +55,23 @@ def own_process_tree():
 
 def watch_owner():
     own_process_tree()
+    # Only this watcher may consume Electron's control byte. A subprocess
+    # inheriting stdin could otherwise block in its own startup, or steal it.
+    import msvcrt
+    owner_fd = os.dup(0)  # non-inheritable
+    with open(os.devnull, 'rb') as empty:
+        os.dup2(empty.fileno(), 0)
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.SetStdHandle.argtypes = [wintypes.DWORD, wintypes.HANDLE]
+    if not kernel.SetStdHandle(-10, msvcrt.get_osfhandle(0)):  # STD_INPUT_HANDLE
+        raise ctypes.WinError(ctypes.get_last_error())
     stopping = threading.Event()
 
     def watch():
         try:
-            os.read(0, 1)  # Quit byte, or EOF if Electron crashed.
+            os.read(owner_fd, 1)  # Quit byte, or EOF if Electron crashed.
         finally:
+            os.close(owner_fd)
             stopping.set()
             # Also covers shutdown before serve() returns and an executor
             # thread stuck during Python finalization after the RPC drain.
