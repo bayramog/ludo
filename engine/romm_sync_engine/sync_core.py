@@ -6457,6 +6457,17 @@ class RomMClient:
         return None, False, None
 
     @staticmethod
+    def _held_by_channel(response):
+        """True for RomM 5.5's 409 on a save or state a sync channel holds:
+        the file now changes only through a snapshot push. Not a sign the
+        server is newer, so it must never trigger a download over it."""
+        try:
+            detail = (response.json() or {}).get('detail')
+        except Exception:
+            detail = response.text
+        return isinstance(detail, str) and 'sync channel' in detail.lower()
+
+    @staticmethod
     def compute_content_hash(file_path):
         """Compute a save file's content hash matching RomM 4.9.0's save-sync engine.
 
@@ -6687,6 +6698,8 @@ class RomMClient:
                         logging.info(f"Upload conflict (409): {message} (type: {error_type})")
                     except:
                         logging.info(f"Upload conflict (409): {response.text[:200]}")
+                    if RomMClient._held_by_channel(response):
+                        return 'channel_held'
                     return 'conflict'
 
                 elif response.status_code == 422:
@@ -6750,8 +6763,8 @@ class RomMClient:
             save_state_id, server_filename = self.upload_save_and_get_id(rom_id, save_type, file_path, emulator, device_id, overwrite, slot, autocleanup, autocleanup_limit)
 
             # Propagate conflict status
-            if save_state_id == 'conflict':
-                return 'conflict'
+            if save_state_id in ('conflict', 'channel_held'):
+                return save_state_id
 
             if not save_state_id:
                 return self.upload_save(rom_id, save_type, file_path, emulator, device_id, overwrite, slot, autocleanup, autocleanup_limit)
@@ -6935,6 +6948,8 @@ class RomMClient:
                         logging.info(f"Upload conflict (409): {message} (type: {error_type})")
                     except:
                         logging.info(f"Upload conflict (409): {response.text[:200]}")
+                    if RomMClient._held_by_channel(response):
+                        return 'channel_held', None
                     return 'conflict', None
                 else:
                     logging.warning(f"Upload failed ({response.status_code}): {response.text[:200]}")
@@ -11881,6 +11896,49 @@ class RetroArchInterface:
         cache[key] = found
         return found
 
+    def core_library_id(self, romm_emulator_name):
+        """The core's library name without "_libretro" ("mgba",
+        "mednafen_psx_hw"), which keys a snapshot's states bank the way
+        Argosy keys it. None when no installed core's .info file matches.
+
+        Ludo records the emulator as RomM spells it, which is sometimes the
+        library name already ("mgba") and sometimes the folder RetroArch
+        sorts into ("beetle_psx_hw" for "Beetle PSX HW"), so both are tried.
+        """
+        if not romm_emulator_name:
+            return None
+        cache = self.__dict__.setdefault('_library_id_cache', {})
+        key = romm_emulator_name.lower()
+        if key in cache:
+            return cache[key]
+        found = None
+        try:
+            info_dir = self.get_retroarch_config_setting('libretro_info_path', '')
+            if not info_dir:
+                cfg_dir = self.find_retroarch_config_dir()
+                info_dir = cfg_dir / 'info' if cfg_dir else None
+            info_dir = Path(info_dir) if info_dir else None
+            if info_dir and info_dir.is_dir():
+                for stem in dict.fromkeys((key, key.replace('_', ''))):
+                    if (info_dir / f'{stem}_libretro.info').is_file():
+                        found = stem
+                        break
+                if not found:
+                    folder = (self.get_retroarch_directory_name(romm_emulator_name) or '').lower()
+                    for info in sorted(info_dir.glob('*_libretro.info')):
+                        for line in info.read_text(errors='replace').splitlines():
+                            name, sep, value = line.partition('=')
+                            if sep and name.strip() == 'corename':
+                                if value.strip().strip('"').lower() == folder:
+                                    found = info.name[:-len('_libretro.info')]
+                                break
+                        if found:
+                            break
+        except Exception:
+            found = None
+        cache[key] = found
+        return found
+
     def get_romm_emulator_name(self, retroarch_directory_name):
         """Convert RetroArch directory name to RomM emulator name using standard convention"""
         # RomM naming convention: lowercase + replace hyphens/spaces with underscores
@@ -14155,6 +14213,14 @@ class AutoSyncManager:
             elif 'state' in file_path.suffix.lower() or file_path.name.lower().endswith('.state.auto'):
                 # ".state.auto" has suffix ".auto" (no "state"), so match by name too.
                 save_type = 'states'
+                if rom_id in self.__dict__.get('_channel_state_roms', ()):
+                    # This game's states go up inside its channel snapshots,
+                    # with its save, as Argosy's do: hand over to the session
+                    # sync the way a save does.
+                    self.last_uploaded[str(file_path)] = current_fingerprint
+                    self._save_upload_fingerprints()
+                    self.trigger_session_save_sync("state changed")
+                    return
                 # Look for thumbnail for save states
                 thumbnail_path = self.retroarch.find_thumbnail_for_save_state(file_path)
             else:
@@ -14194,6 +14260,16 @@ class AutoSyncManager:
                 # user instead of reporting a failure.
                 self.log(f"📴 Offline — {file_path.name} will sync on next connection")
                 self.retroarch.send_notification("Offline — save will upload on next connection")
+            elif result == 'channel_held':
+                # Another client (Argosy, or this one before) put this file in
+                # a channel snapshot. The local copy is the newer one: it goes
+                # up with the next channel sync, never replaced by the server's.
+                self.__dict__.setdefault('_channel_state_roms', set()).add(rom_id)
+                self.last_uploaded[str(file_path)] = current_fingerprint
+                self._save_upload_fingerprints()
+                self.log(f"🔗 {file_path.name} belongs to a sync channel — "
+                         f"it syncs with the game's snapshot")
+                self.trigger_session_save_sync("state in channel")
             elif result == 'conflict':
                 self.log(f"⚠️ Server returned 409 Conflict for {file_path.name} — server has newer version, triggering download")
                 self.retroarch.send_notification(f"Sync conflict: {file_path.name}")
@@ -16711,15 +16787,34 @@ class AutoSyncManager:
                     entry['_path'], entry.get('updated_at'))
 
             try:
+                states = self._channel_states(game, entry.get('emulator')) if game else None
+            except Exception as e:
+                # States never cost the save its sync: it goes up without them.
+                logging.warning(f"[CHANNELS] states of {path.name} not read: {e}")
+                states = None
+            if states is not None:
+                # From here this game's states go up inside its snapshots;
+                # the legacy upload would answer 409 for any a snapshot holds.
+                self.__dict__.setdefault('_channel_state_roms', set()).add(rom_id)
+            try:
                 out = sync.sync(
                     rom_file['id'],
                     save_channels.SaveHashes(content_hash, content_hash),
                     load, emulator='retroarch', core=entry.get('emulator'),
                     choose=choose,
                     uploading=lambda rom_id=rom_id, path=path:
-                        self._activity_upload(rom_id, path))
+                        self._activity_upload(rom_id, path),
+                    states=states)
                 if out.kind == 'download':
-                    out = self._write_channel_download(sync, rom_file['id'], path, out)
+                    out = self._write_channel_download(sync, rom_file['id'], path, out,
+                                                       game=game, states=states)
+                elif out.kind in ('up_to_date', 'adopted') and states is not None:
+                    # In step with the channel, but a slot it banks may be
+                    # missing here (a new device, a cleared folder): refill
+                    # those, never overwriting a state on disk.
+                    snap = out.snapshot or (out.channel or {}).get('current')
+                    self._write_channel_states(sync, game, states, snap,
+                                               overwrite=False)
             except Exception as e:
                 self.log(f"❌ Channel sync for {path.name} failed: {e}")
                 summary['errors'] += 1
@@ -16769,7 +16864,8 @@ class AutoSyncManager:
             self._save_upload_fingerprints()
         return keys, errored
 
-    def _write_channel_download(self, sync, rom_file_id, path, out):
+    def _write_channel_download(self, sync, rom_file_id, path, out, game=None,
+                                states=None):
         """Write a channel's current save over the local one, in place.
 
         In place, because the local file is the one the emulator reads; the
@@ -16780,6 +16876,11 @@ class AutoSyncManager:
         if not save:
             # A snapshot of states only: no save to write.
             return save_channels.ChannelOutcome('up_to_date', channel=out.channel)
+        if states is not None and not self._write_channel_states(
+                sync, game, states, out.snapshot, overwrite=True, backup=out.backup):
+            # States first: a save written without its states would be held
+            # as applied, and the missing states never fetched again.
+            return save_channels.ChannelOutcome('failed', reason='state download failed')
         data = sync.api.save_content(save['id'])
         if data is None:
             return save_channels.ChannelOutcome('failed', reason='download failed')
@@ -16793,6 +16894,95 @@ class AutoSyncManager:
         self.log(f"⬇️ {path.name} ← channel {(out.channel or {}).get('label')!r}")
         return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
                                             channel=out.channel)
+
+    def _channel_states(self, game, emulator):
+        """This game's states on disk as save_channels.LocalStates, under the
+        core RetroArch runs it with, or None when that core has no libretro
+        library name to bank them under (they keep the legacy path then).
+
+        Only the folder RetroArch reads for this core is scanned: a state in
+        another core's folder is that core's, and no core loads another's.
+        """
+        core = self.retroarch.core_library_id(emulator) if emulator else None
+        if not core:
+            return None
+        _, target_dir, stem = self.state_location_for_game(game, emulator)
+        if not target_dir:
+            return None
+        stems = self._state_stems_for_game(game) or [stem]
+        parts = {}
+        try:
+            files = sorted(target_dir.iterdir()) if target_dir.is_dir() else []
+        except OSError:
+            files = []
+        # Best stem first: the name the launch reads wins a slot both carry.
+        for candidate in stems:
+            for f in files:
+                if not f.name.startswith(candidate + '.state') or not f.is_file():
+                    continue
+                slot = save_channels.state_slot(f.name[len(candidate):])
+                if slot is None or slot in parts:
+                    continue
+                digest = RomMClient.compute_content_hash(f)
+                if not digest:
+                    continue
+                shot = f.with_name(f.name + '.png')
+                parts[slot] = save_channels.StatePart(
+                    slot, f, digest, shot if shot.is_file() else None)
+        return save_channels.LocalStates(
+            core, tuple(parts[k] for k in sorted(parts)), folder=target_dir, stem=stems[0])
+
+    def _write_channel_states(self, sync, game, states, snapshot, overwrite,
+                              backup=False):
+        """Write ``snapshot``'s states for ``states.core`` where RetroArch reads
+        them, each with its screenshot. True unless a download failed.
+
+        ``overwrite`` False only fills slots missing on disk. A slot the
+        snapshot doesn't bank is left alone, never deleted: the bank may come
+        from a client that only syncs some slots. ``backup`` keeps a differing
+        local state beside the new one, as a downloaded save does.
+        """
+        bank = ((snapshot or {}).get('states') or {}).get(states.core) or {}
+        if not bank:
+            return True
+        target_dir, stem = states.folder, states.stem
+        if not target_dir or not stem:
+            return True
+        have = {p.slot: p for p in states.parts}
+        written = 0
+        for slot, remote in bank.items():
+            suffix = save_channels.state_suffix(slot)
+            if not suffix or not (remote or {}).get('download_path'):
+                continue
+            local = have.get(slot)
+            if local is not None and (not overwrite
+                                      or local.content_hash == remote.get('content_hash')):
+                continue
+            dest = local.path if local is not None else target_dir / f'{stem}{suffix}'
+            data = sync.api.download(remote['download_path'])
+            if data is None:
+                self.log(f"❌ Could not download state slot {slot} of {dest.name}")
+                return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if local is not None and backup:
+                stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+                shutil.copy2(dest, dest.with_name(dest.name + f'.local-{stamp}'))
+            tmp = dest.with_name(dest.name + '.part')
+            tmp.write_bytes(data)
+            os.replace(tmp, dest)
+            shot_path = ((remote.get('screenshot') or {}).get('download_path'))
+            if shot_path:
+                shot = sync.api.download(shot_path)
+                if shot is not None:
+                    png = dest.with_name(dest.name + '.png')
+                    png_tmp = png.with_name(png.name + '.part')
+                    png_tmp.write_bytes(shot)
+                    os.replace(png_tmp, png)
+            written += 1
+        if written:
+            self.log(f"⬇️ {written} state(s) for {game.get('name') or stem} "
+                     f"← {states.core}")
+        return True
 
     def run_negotiated_save_sync(self, conflict_resolver=None, trigger="", only_rom_id=None):
         # RPC-triggered conflict/re-pair syncs run outside our worker threads.
