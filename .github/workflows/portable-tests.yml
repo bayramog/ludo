@@ -40,6 +40,12 @@ jobs:
       - name: Native backend tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python scripts/test_backend.py --native --report-dir test-evidence/backend
+      - name: Windows backend launch, profile switch and shutdown
+        if: runner.os == 'Windows'
+        run: node --test desktop/tests/backend-lifecycle.test.mjs desktop/tests/windows-backend.native.mjs
+      - name: Windows owned process tree and external emulator
+        if: runner.os == 'Windows'
+        run: python desktop/tests/windows_process_tree.py
       # Only bounded structural summaries: never profile files or raw logs/XML.
       - name: Upload failure evidence
         if: failure()

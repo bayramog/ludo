@@ -914,6 +914,10 @@ def cemu_is_running():
 
 def _pids_named(prefix):
     """PIDs whose process name starts with `prefix`, zombies excluded."""
+    if os.name == 'nt':
+        import psutil
+        return [proc.info['pid'] for proc in psutil.process_iter(['pid', 'name'])
+                if (proc.info['name'] or '').casefold() == prefix + '.exe']
     pids = []
     try:
         for entry in Path('/proc').iterdir():
@@ -967,6 +971,10 @@ def close_eden(timeout=10.0):
     menu. Whatever game it was running loses unsaved progress either way,
     which is why callers ask the user first.
     """
+    if os.name == 'nt':
+        # SIGTERM on Windows is TerminateProcess, not an emulator save/quit
+        # request. Let the player close Eden before changing its settings.
+        return not eden_is_running()
     for pid in eden_pids():
         try:
             os.kill(pid, signal.SIGTERM)
