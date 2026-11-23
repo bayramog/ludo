@@ -17033,12 +17033,26 @@ class AutoSyncManager:
             shutil.copy2(path, path.with_suffix(path.suffix + f".local-{stamp}"))
         tmp = path.with_suffix(path.suffix + '.part')
         tmp.write_bytes(data)
-        if not self._convert_channel_save(tmp, path, save, game):
+        converted = self._convert_channel_save(tmp, path, save, game)
+        if not converted:
             os.replace(tmp, path)
         sync.finish_download(rom_file_id, out.channel, out.snapshot)
+        if converted:
+            # The snapshot's hashes are of the other client's unit, which
+            # the converted file never matches: held as-is, the next sync
+            # would read it as local play and push the same save back.
+            self._hold_converted(sync, rom_file_id, path)
         self.log(f"⬇️ {path.name} ← channel {(out.channel or {}).get('label')!r}")
         return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
                                             channel=out.channel)
+
+    def _hold_converted(self, sync, rom_file_id, path):
+        state = sync.store.get(rom_file_id)
+        local = RomMClient.compute_content_hash(path)
+        if state is None or not local:
+            return
+        state.held_content_hash = state.held_identity_hash = local
+        sync.store._save()
 
     def _convert_channel_save(self, tmp, path, save, game):
         """Turn a channel save another client pushed (Argosy's N64 zip of
