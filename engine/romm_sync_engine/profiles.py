@@ -483,9 +483,10 @@ def create(name='', copy_from=None):
     target.mkdir(parents=True, exist_ok=False)
     source = paths.profile_dir(copy_from or paths.profile_id()) / 'settings.ini'
     if source.exists():
-        src = configparser.ConfigParser()
-        src.read(source)
-        out = configparser.ConfigParser()
+        # Match SettingsManager: paths are literal UTF-8 values, including '%'.
+        src = configparser.ConfigParser(interpolation=None)
+        src.read(source, encoding='utf-8')
+        out = configparser.ConfigParser(interpolation=None)
         for section in _MACHINE_SECTIONS:
             if src.has_section(section):
                 out[section] = dict(src[section])
