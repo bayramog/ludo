@@ -12028,7 +12028,7 @@ class RetroArchInterface:
             if not info_dir:
                 cfg_dir = self.find_retroarch_config_dir()
                 info_dir = cfg_dir / 'info' if cfg_dir else None
-            info_dir = Path(info_dir) if info_dir else None
+            info_dir = self._host_path(Path(info_dir)) if info_dir else None
             if info_dir and info_dir.is_dir():
                 for stem in dict.fromkeys((key, key.replace('_', ''))):
                     if (info_dir / f'{stem}_libretro.info').is_file():
@@ -12049,6 +12049,22 @@ class RetroArchInterface:
             found = None
         cache[key] = found
         return found
+
+    @staticmethod
+    def _host_path(path):
+        """A path from a Flatpak RetroArch's config, as the host sees it.
+
+        The Flatpak writes its bundled folders (``/app/share/libretro/info``)
+        as the sandbox sees them; outside it they live under the app's
+        ``files`` folder, in the user or the system installation."""
+        if path.is_dir() or not str(path).startswith('/app/'):
+            return path
+        rel = str(path)[len('/app/'):]
+        for root in (Path.home() / '.local/share/flatpak', Path('/var/lib/flatpak')):
+            candidate = root / 'app/org.libretro.RetroArch/current/active/files' / rel
+            if candidate.is_dir():
+                return candidate
+        return path
 
     def get_romm_emulator_name(self, retroarch_directory_name):
         """Convert RetroArch directory name to RomM emulator name using standard convention"""
