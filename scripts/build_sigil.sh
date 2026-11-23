@@ -23,7 +23,7 @@ set -euo pipefail
 # string upstream reports has read "0.1.0-dev" for every build so far, so this
 # is the only record of which code is bundled.
 SIGIL_REPO="${SIGIL_REPO:-https://github.com/rommapp/argosy-sigil}"
-SIGIL_COMMIT="${SIGIL_COMMIT:-8a3b008}"
+SIGIL_COMMIT="${SIGIL_COMMIT:-4d94424}"
 
 # Resolved before any cd: "$0" may be relative.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
