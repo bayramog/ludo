@@ -17033,11 +17033,34 @@ class AutoSyncManager:
             shutil.copy2(path, path.with_suffix(path.suffix + f".local-{stamp}"))
         tmp = path.with_suffix(path.suffix + '.part')
         tmp.write_bytes(data)
-        os.replace(tmp, path)
+        if not self._convert_channel_save(tmp, path, save, game):
+            os.replace(tmp, path)
         sync.finish_download(rom_file_id, out.channel, out.snapshot)
         self.log(f"⬇️ {path.name} ← channel {(out.channel or {}).get('label')!r}")
         return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
                                             channel=out.channel)
+
+    def _convert_channel_save(self, tmp, path, save, game):
+        """Turn a channel save another client pushed (Argosy's N64 zip of
+        eeprom/pak/sram, a DuckStation card) into the core's file at ``path``.
+        True when ``path`` now holds it; False leaves ``tmp`` for a raw write."""
+        if game is None:
+            return False
+        platform = _platform_of(game)
+        try:
+            core = self._core_for_game(game)
+        except Exception:
+            core = None
+        if not save_convert.needs_conversion(save.get('file_name'), save.get('emulator'),
+                                             platform, core):
+            return False
+        unit = tmp.with_suffix(Path(save.get('file_name') or '').suffix or '.bin')
+        os.replace(tmp, unit)
+        if save_convert.convert_into_core(unit, path, platform, core,
+                                          game.get('local_path'), self.log):
+            return True
+        os.replace(unit, tmp)
+        return False
 
     def _channel_states(self, game, emulator):
         """This game's states on disk as save_channels.LocalStates, under the
