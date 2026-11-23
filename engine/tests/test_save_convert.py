@@ -36,6 +36,8 @@ def names():
     check('content stem wins', c('X_1.mcd', '/r/Chicken Run.chd'), 'Chicken Run.srm')
     check('mcd slot dropped', c('Chicken Run_1.mcd'), 'Chicken Run.srm')
     check('zip renamed', c('Mario.zip'), 'Mario.srm')
+    check('argosy timestamp dropped',
+          c('Super Mario 64 (Europe) [2026-11-23_21-48-23-566].zip'), 'Super Mario 64 (Europe).srm')
 
 
 def ps1_raw_card_placed():

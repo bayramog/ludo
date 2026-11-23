@@ -39,11 +39,11 @@ _PS1_CARD = 128 * 1024
 
 def core_save_name(file_name, content_path=None):
     """The file a RetroArch core reads for this game: <content stem>.srm,
-    or, without local content, the server's name less DuckStation's slot
-    suffix."""
+    or, without local content, the server's name less its upload timestamp
+    and DuckStation's slot suffix."""
     if content_path:
         return Path(content_path).stem + '.srm'
-    stem = Path(file_name or 'save').stem
+    stem = re.sub(r'\s*\[[\d\-\s:_]+\]', '', Path(file_name or 'save').stem).strip() or 'save'
     if Path(file_name or '').suffix.lower() == '.mcd' and re.search(r'_\d$', stem):
         stem = stem[:-2]
     return stem + '.srm'
