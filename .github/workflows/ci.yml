@@ -39,11 +39,20 @@ jobs:
       # harness, so `pytest engine/tests/` collects nothing and exits 0 -- a
       # green run that tested absolutely nothing. run.sh is the way in.
       - name: Engine suite
-        run: engine/tests/run.sh
+        run: engine/tests/run.sh --report-dir test-evidence/engine
 
       - name: Backend suite
-        working-directory: app
-        run: pytest
+        if: ${{ !cancelled() }}
+        run: python scripts/test_backend.py --report-dir test-evidence/backend
+
+      - name: Upload Python failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-python-failure
+          path: test-evidence/*/summary.json
+          retention-days: 7
+          if-no-files-found: warn
 
   desktop:
     name: Desktop (typecheck + host contract + render)

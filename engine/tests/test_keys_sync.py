@@ -16,7 +16,10 @@ from test_keys import KEY_TEXT, OTHER_KEY_TEXT, TITLE_KEY_TEXT
 
 
 def main():
-    with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'HOME': tmp}):
+    with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+            'HOME': tmp, 'USERPROFILE': tmp,
+            'LOCALAPPDATA': str(Path(tmp) / 'AppData/Local'),
+            'APPDATA': str(Path(tmp) / 'AppData/Roaming')}):
         root = Path(tmp)
         data = root / '.local/share/eden'
         registered = data / 'nand/system/Contents/registered'

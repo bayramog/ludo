@@ -16,11 +16,11 @@ from romm_sync_engine.sync_core import RetroArchInterface, STANDALONE_EMULATORS 
 
 def main():
     ra = RetroArchInterface.__new__(RetroArchInterface)
-    rom = '/home/deck/Ludo/roms/switch/Pokémon Legends Arceus/game.nsp'
+    rom = str(Path('/home/deck/Ludo/roms/switch/Pokémon Legends Arceus/game.nsp'))
     got = ra.build_standalone_launch_command(
         rom, 'eden', STANDALONE_EMULATORS['eden'], 'flatpak:dev.eden_emu.eden')
     want = ['flatpak', 'run',
-            '--filesystem=/home/deck/Ludo/roms/switch/Pokémon Legends Arceus:ro',
+            f'--filesystem={Path(rom).parent}:ro',
             'dev.eden_emu.eden', '-f', '-g', rom]
     print('ok  ' if got == want else 'FAIL', got)
     return 0 if got == want else 1
