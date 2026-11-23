@@ -6158,6 +6158,9 @@ class LudoBackend:
             if not SYNC_CORE_AVAILABLE:
                 return {'success': False, 'error': 'sync_core not available'}
 
+            # Before anything below drops the client or the settings it needs.
+            await self._revoke_paired_token(SettingsManager())
+
             result = {'success': True, 'deleted_roms': 0, 'deleted_bios': 0}
             if wipe_data:
                 # reset_all_settings deletes ROMs/BIOS, clears sync state, and
@@ -6166,11 +6169,12 @@ class LudoBackend:
             else:
                 self._stop_sync()
 
+            settings = SettingsManager()
             # Clear credentials so configured == False. Keep url/username so the
             # wizard can pre-fill the server for a quick log back in.
-            settings = SettingsManager()
             settings.set('RomM', 'password', '')
             settings.set('RomM', 'client_token', '')
+            settings.set('RomM', 'client_token_id', '')
             settings.set('RomM', 'auto_connect', 'false')
 
             with self._rpc_state_lock:
@@ -6193,6 +6197,33 @@ class LudoBackend:
         except Exception as e:
             logging.error(f"logout error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    async def _revoke_paired_token(self, settings):
+        """Revoke this install's Client API Token on the server, best effort.
+
+        Without it every re-pair left the old token valid on the server.
+        Only tokens paired since the id was recorded can be revoked; older
+        installs and password sign-ins have no id and are left alone. Never
+        blocks log out: offline or a failed call just logs.
+        """
+        token_id = (settings.get('RomM', 'client_token_id', '') or '').strip()
+        client = self._romm_client
+        if not token_id or not settings.get('RomM', 'client_token', ''):
+            return False
+        if not (client and getattr(client, 'client_token', None)):
+            logging.info("[AUTH] not connected; client token left on the server")
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+            ok = await asyncio.wait_for(
+                loop.run_in_executor(None, client.revoke_client_token, token_id),
+                timeout=15)
+        except Exception as e:
+            logging.warning(f"[AUTH] revoking client token failed: {e}")
+            return False
+        if ok:
+            logging.info(f"[AUTH] revoked client token {token_id}")
+        return bool(ok)
 
     def _push_device_name(self, device_id, remote=None):
         """Tell RomM what this device is called. Blocking; call off the loop.
@@ -6668,16 +6699,17 @@ class LudoBackend:
             if not code or not str(code).strip():
                 return {'success': False, 'message': 'Pairing code is required'}
 
-            token = RomMClient(url).exchange_pair_code(str(code).strip())
+            exchanger = RomMClient(url)
+            token = exchanger.exchange_pair_code(str(code).strip())
             if not token:
                 return {'success': False, 'message': 'Invalid or expired pairing code'}
 
-            return await self._apply_pairing(url, token)
+            return await self._apply_pairing(url, token, exchanger.paired_token_id)
         except Exception as e:
             logging.error(f"pair_device error: {e}", exc_info=True)
             return {'success': False, 'message': str(e)}
 
-    async def _apply_pairing(self, url, token):
+    async def _apply_pairing(self, url, token, token_id=None):
         """Store a freshly obtained Client API Token and start connecting.
 
         Shared by both pairing routes — the typed 8-digit code and the QR device
@@ -6696,8 +6728,17 @@ class LudoBackend:
                      or (settings.get('RomM', 'username')
                          and settings.get('RomM', 'password')))
                 and not ds_before.get('needs_onboarding'))
+            # A re-pair replaces the token; retire the one it replaces so
+            # re-pairing doesn't leave a live token behind each time.
+            if (settings.get('RomM', 'client_token', '') not in ('', token)
+                    and (settings.get('RomM', 'url', '') or '').rstrip('/') == url.rstrip('/')
+                    and (settings.get('RomM', 'client_token_id', '') or '') != str(token_id or '')):
+                await self._revoke_paired_token(settings)
             settings.set('RomM', 'url', url)
             settings.set('RomM', 'client_token', token)
+            # Always overwrite: a stale id from the previous pairing would
+            # revoke a token this install no longer uses.
+            settings.set('RomM', 'client_token_id', str(token_id or ''))
             settings.set('RomM', 'auto_connect', 'true')
             # Clear the onboarding flag so get_config() reports configured — pairing
             # is a complete setup path (save_config does the same for password auth).
@@ -6860,7 +6901,8 @@ class LudoBackend:
                     self._install_not_bound = False
                     logging.info(f"[DEVICE] adopted the paired device "
                                  f"{poller.paired_device_id}")
-                result = await self._apply_pairing(state['url'], value)
+                result = await self._apply_pairing(state['url'], value,
+                                                   poller.paired_token_id)
                 return {**result, 'status': 'approved'}
             if status == 'slow_down':
                 # The server is asking us to back off; widen the interval the

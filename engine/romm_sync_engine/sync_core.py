@@ -3314,6 +3314,11 @@ class RomMClient:
         # The device a QR pairing's token is bound to (RomM creates one per
         # approval). Set by device_auth_poll on success.
         self.paired_device_id = None
+        # The server-side id of the token the last pairing issued (both
+        # routes return it). Needed to revoke that token on log out: a
+        # device-bound token can list the account's tokens but several can
+        # share one device, so it can't pick itself out afterwards.
+        self.paired_token_id = None
 
         # OAuth2 token storage
         self.access_token = None
@@ -3539,8 +3544,10 @@ class RomMClient:
                 timeout=15,
             )
             if resp.status_code in (200, 201):
-                raw = resp.json().get('raw_token')
+                body = resp.json() or {}
+                raw = body.get('raw_token')
                 if raw:
+                    self.paired_token_id = body.get('id')
                     print("✅ Pairing code exchanged for Client API Token")
                     return raw
                 print("⚠️ Exchange succeeded but no raw_token in response")
@@ -3619,6 +3626,7 @@ class RomMClient:
                 token = body.get('access_token')
                 if token:
                     self.paired_device_id = body.get('device_id')
+                    self.paired_token_id = body.get('id')
                     print("✅ Device authorization approved")
                     return ('approved', token)
                 return ('error', 'Approved but no token returned')
@@ -4044,6 +4052,28 @@ class RomMClient:
 
         except Exception as e:
             print(f"Error updating device: {e}")
+            return False
+
+    def revoke_client_token(self, token_id):
+        """Revoke the Client API Token this client signs in with.
+
+        RomM lets a client token revoke itself without me.write. Returns True
+        when the token is gone (200, or 404/401 because it already was).
+        """
+        if not token_id:
+            return False
+        try:
+            response = self.session.delete(
+                urljoin(self.base_url, f'/api/client-tokens/{token_id}'),
+                timeout=10,
+            )
+            if response.status_code in (200, 204, 401, 404):
+                print(f"✅ Client token {token_id} revoked")
+                return True
+            print(f"Failed to revoke client token {token_id}: HTTP {response.status_code}")
+            return False
+        except Exception as e:
+            print(f"Error revoking client token: {e}")
             return False
 
     def delete_device(self, device_id):
