@@ -69,6 +69,9 @@ if [ -d "$BUNDLE_DIR" ]; then
   cp "$BUILD_DIR/libsigil.so" "$BUNDLE_DIR/libsigil.so"
   echo "==> installed into $BUNDLE_DIR/libsigil.so"
 fi
+# The header the bundled build came from, so test_sigil_saves can check the
+# ctypes mirrors in sigil_saves.py against it.
+cp "$SRC_DIR/include/sigil.h" "$REPO_ROOT/engine/tests/sigil.h"
 
 echo
 echo "built: $BUILD_DIR/libsigil.so ($(git rev-parse --short HEAD))"

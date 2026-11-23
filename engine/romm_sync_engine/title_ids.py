@@ -78,6 +78,7 @@ log = logging.getLogger(__name__)
 # library can reject a mismatched caller, and sigil_result is a caller-owned
 # out-parameter — nothing here allocates, so there is nothing to free.
 _SIGIL_RESULT_V3 = 3
+_SIGIL_RESULT_V4 = 4  # adds the N64 cart identity (sigil 4d94424)
 _SIGIL_SUPPORT_V1 = 1
 _SIGIL_OPTIONS_V1 = 1
 
@@ -248,7 +249,7 @@ class _Sigil:
         """
         if not self._lib:
             return None
-        result = _SigilResult(struct_version=_SIGIL_RESULT_V3)
+        result = _SigilResult(struct_version=_SIGIL_RESULT_V4)
         options = _SigilOptions(struct_version=_SIGIL_OPTIONS_V1,
                                 flags=_SIGIL_FLAG_FILENAME_FALLBACK)
         support = None
