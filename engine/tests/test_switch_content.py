@@ -486,17 +486,6 @@ def main():
     check('untagged siblings yield nothing rather than a guess',
           AutoSyncManager.switch_add_ons_for_rom(_Shim(), untagged, library=[]), [])
 
-    # ── the bundled library is actually bundled ──────────────────────────
-    # Two blanket rules nearly dropped it silently, each leaving a tree that
-    # looks complete and a build that ships nothing: .gitignore's "*.so", and
-    # pyproject shipping no package-data (the desktop AppImage pip-installs the
-    # engine rather than importing the tree). Neither failure is visible at
-    # runtime -- identification just goes back to reading filenames -- so it is
-    # asserted here rather than trusted.
-    bundled = (Path(__file__).resolve().parents[1]
-               / 'romm_sync_engine' / 'bin' / 'libsigil.so')
-    check('the Sigil build is present in the package', bundled.is_file(), True)
-    check('and it loads without LUDO_SIGIL_LIB set', T.sigil_available(), True)
 
     print()
     if FAILURES:

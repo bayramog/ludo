@@ -33,6 +33,7 @@ Asserted:
 """
 import json
 import sys
+from unittest.mock import patch
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -353,7 +354,10 @@ def test_tracker():
     check('gap taken as suspend', t2.observe(False), ('end', (4, s, s + 1002, 2000)))
 
 
-def test_recovery():
+# This unit fixture supplies a synthetic boot, just as it supplies the clock.
+# Native Windows boot identity remains F1-03/#10, not implied by this test.
+@patch.object(ps, 'boot_id', return_value='fixture-boot')
+def test_recovery(_boot):
     clock = Clock()
     t = ps.SessionTracker(clock, suspend_clock=lambda: clock.susp)
     t.launched(5)
@@ -372,6 +376,10 @@ def test_recovery():
     # The emulator is gone: ended when last seen.
     t3 = ps.SessionTracker(clock, suspend_clock=lambda: clock.susp)
     check('ended at last seen', t3.resume(saved, running=False), (5, start, start + 300, 300_000))
+    # Unknown boot must also close conservatively, including on Windows.
+    unknown = ps.SessionTracker(clock, suspend_clock=lambda: clock.susp)
+    check('unknown boot ends it', unknown.resume(dict(saved, boot=''), running=True),
+          (5, start, start + 300, 300_000))
     # Another boot: ended when last seen, even if an emulator is up now.
     t4 = ps.SessionTracker(clock, suspend_clock=lambda: clock.susp)
     check('reboot ends it', t4.resume(dict(saved, boot='other'), running=True),

@@ -31,7 +31,10 @@ def main():
     from romm_sync_engine.sync_core import SettingsManager
     saved = {k: os.environ.pop(k, None) for k in ('LOGNAME', 'USER', 'LNAME', 'USERNAME')}
     try:
-        check('pwd fallback matches getpass', SettingsManager._env_user(), getpass.getuser())
+        if sys.platform == 'win32':
+            check('Windows fallback matches getlogin', SettingsManager._env_user(), os.getlogin())
+        else:
+            check('pwd fallback matches getpass', SettingsManager._env_user(), getpass.getuser())
         os.environ['USER'] = 'root'
         check('$USER wins like getpass', SettingsManager._env_user(), getpass.getuser())
         os.environ['LOGNAME'] = 'deck'

@@ -60,48 +60,5 @@ pick_python() {
 py=$(pick_python) || { echo "Could not find or build a usable Python." >&2; exit 2; }
 have_deps "$py" || { echo "$py is missing the engine's dependencies." >&2; exit 2; }
 
-files=()
-for f in "$here"/test_*.py; do
-    [ -e "$f" ] || continue
-    if [ $# -gt 0 ]; then
-        for pattern in "$@"; do
-            case "$(basename "$f")" in *"$pattern"*) files+=("$f"); break;; esac
-        done
-    else
-        files+=("$f")
-    fi
-done
-
-if [ ${#files[@]} -eq 0 ]; then
-    echo "No test files matched: $*" >&2
-    exit 2
-fi
-
-echo "python: $py"
-echo
-failed=()
-log=$(mktemp)
-trap 'rm -f "$log"' EXIT
-
-for f in "${files[@]}"; do
-    name=$(basename "$f")
-    printf '%-44s ' "$name"
-    # cwd is the engine root: the files put parents[1] on sys.path themselves,
-    # but anything reading a relative path expects to be there.
-    if (cd "$engine" && "$py" "$f") >"$log" 2>&1; then
-        echo 'PASS'
-    else
-        echo 'FAIL'
-        # Only the failing run's output, indented — a passing suite stays a
-        # readable column, and a failure shows its reason without a re-run.
-        sed 's/^/    /' "$log"
-        failed+=("$name")
-    fi
-done
-
-echo
-if [ ${#failed[@]} -gt 0 ]; then
-    echo "${#failed[@]} of ${#files[@]} FAILED: ${failed[*]}"
-    exit 1
-fi
-echo "all ${#files[@]} test files passed"
+# Keep bootstrap/explicit interpreter/offline behavior; execution is portable.
+exec "$py" "$here/run.py" "$@"

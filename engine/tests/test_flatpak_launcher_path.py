@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -51,9 +52,9 @@ def launcher(root, app_id):
 
 def main():
     with tempfile.TemporaryDirectory() as home:
-        old = os.environ.get('HOME')
-        os.environ['HOME'] = home
-        try:
+        with patch.dict(os.environ, HOME=home, USERPROFILE=home,
+                        APPDATA=str(Path(home) / 'roaming'),
+                        LOCALAPPDATA=str(Path(home) / 'local')):
             h = Path(home)
             for app_id in ('org.libretro.RetroArch', 'net.retrodeck.retrodeck'):
                 cfg = h / '.var/app' / app_id / 'config/retroarch'
@@ -73,9 +74,6 @@ def main():
             (native / 'retroarch').write_text('')
             check('native binary keeps its folder',
                   make_ra(native / 'retroarch').find_retroarch_config_dir(), native)
-        finally:
-            if old is not None:
-                os.environ['HOME'] = old
     return 1 if FAILURES else 0
 
 

@@ -209,16 +209,23 @@ def credentials(d):
     ini = cfg / 'settings.ini'
     ini.write_text('[RomM]\nurl = http://x\npassword = hunter2\n')
     os.chmod(ini, 0o644)
-    env = dict(os.environ, HOME=str(d / 'home'), XDG_CONFIG_HOME=str(d / 'home/.config'))
+    env = dict(os.environ, HOME=str(d / 'home'), USERPROFILE=str(d / 'home'),
+               LOCALAPPDATA=str(d / 'home/AppData/Local'),
+               APPDATA=str(d / 'home/AppData/Roaming'),
+               XDG_CONFIG_HOME=str(d / 'home/.config'))
     out = subprocess.run([sys.executable, '-c', PROG, str(ENGINE)], env=env,
                          capture_output=True, text=True)
     check('password still reads back', out.stdout.splitlines()[-2:-1], ['hunter2'])
     check('encrypted on disk', 'hunter2' in ini.read_text(), False)
-    check('owner-only', stat.S_IMODE(ini.stat().st_mode), 0o600)
+    if os.name != 'nt':
+        check('owner-only', stat.S_IMODE(ini.stat().st_mode), 0o600)
+    else:
+        print('PLATFORM-NOTE: POSIX mode bits do not test Windows ACLs; F1-01/#6 owns ACL acceptance')
     out = subprocess.run([sys.executable, '-c', PROG, str(ENGINE)], env=env,
                          capture_output=True, text=True)
     check('reads back after migration', out.stdout.splitlines()[-2:-1], ['hunter2'])
-    check('owner-only after a rewrite', stat.S_IMODE(ini.stat().st_mode), 0o600)
+    if os.name != 'nt':
+        check('owner-only after a rewrite', stat.S_IMODE(ini.stat().st_mode), 0o600)
 
 
 def main():

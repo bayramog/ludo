@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -71,12 +72,11 @@ def write_cfg(text):
 
 def in_fresh_home(fn):
     with tempfile.TemporaryDirectory() as home:
-        old = os.environ.get('HOME')
-        os.environ['HOME'] = home
-        try:
+        with patch.dict(os.environ, HOME=home, USERPROFILE=home,
+                        LOCALAPPDATA=str(Path(home) / 'AppData/Local'),
+                        APPDATA=str(Path(home) / 'AppData/Roaming')):
             fn()
-        finally:
-            os.environ['HOME'] = old
+
 
 
 def configured_folder_wins():
