@@ -2728,6 +2728,24 @@ def _extract_7z_cli(exe, archive_path, dest_dir, emit):
 # measuring contention from an unrelated stuck query, not offset cost.
 LIBRARY_PAGE_SIZE = 100
 
+# RomM 5.5 serves big pages without the cliff above: measured 2026-11-23 on a
+# 20,168-ROM library, a full walk took 46s at 100 and 23s at 500 (worst page
+# 0.9s), and a 15MB page answered in 2s. 500 rather than 1000: 1000 gained
+# only 3s more while doubling what one slow page costs. Older servers keep
+# LIBRARY_PAGE_SIZE, so the cliff they still have stays out of reach.
+LIBRARY_PAGE_SIZE_5_5 = 500
+
+
+def server_version_at_least(version, wanted):
+    """True when a RomM version string ("5.5.0-beta.1") is at least the
+    (major, minor, patch) wanted. A pre-release counts as its release: the
+    betas carry the features. Unknown or unparsable is False."""
+    nums = re.findall(r'\d+', (version or '').split('-', 1)[0])
+    if not nums:
+        return False
+    got = tuple(int(n) for n in nums[:3]) + (0,) * (3 - len(nums[:3]))
+    return got >= tuple(wanted)
+
 # Hard ceiling on any single /api/roms request, wherever it comes from.
 #
 # Three call sites independently picked oversized limits — 1000 for the full
@@ -2738,8 +2756,10 @@ LIBRARY_PAGE_SIZE = 100
 # here, at the one place a limit turns into a request, rather than in each
 # caller's judgement.
 #
-# 250 is above LIBRARY_PAGE_SIZE (so it never interferes with the paged walk)
-# and still under the measured cliff at ~3.3MB. It is a backstop, not a
+# 250 is above LIBRARY_PAGE_SIZE and still under the measured cliff at
+# ~3.3MB. The paged walk must not go through it: on RomM 5.5 it pages by
+# LIBRARY_PAGE_SIZE_5_5 (500), where the cliff is gone, so a clamp to 250
+# there would silently skip half of every page. It is a backstop, not a
 # recommendation: code that wants many rows should page, not raise this.
 MAX_ROMS_REQUEST_LIMIT = 250
 
@@ -3203,8 +3223,34 @@ class _OperationSession(requests.Session):
                 else:
                     self.headers['Authorization'] = authorization
                 self.cookies = copy.deepcopy(owner._session.cookies)
+        if str(method).upper() == 'GET' and urlparse(str(url)).path.rstrip('/').endswith('/api/roms'):
+            kwargs['params'] = _without_provider_metadata(kwargs.get('params'))
         # A successful refresh must persist its rotated tokens before cancel.
         return super().request(method, url, *args, **kwargs)
+
+
+def _without_provider_metadata(params):
+    """The /api/roms params with with_provider_metadata=false added.
+
+    RomM 5.5 then leaves out the per-provider metadata blobs (igdb_metadata,
+    ss_metadata, merged_ra_metadata and the rest), half of every library page.
+    No list reader uses them: the game detail and the achievement lookup fetch
+    /api/roms/{id}, which keeps them. Older servers ignore the parameter. A
+    caller that sets it itself wins.
+    """
+    if params is None:
+        return {'with_provider_metadata': 'false'}
+    if isinstance(params, dict):
+        if 'with_provider_metadata' in params:
+            return params
+        return {**params, 'with_provider_metadata': 'false'}
+    try:
+        pairs = list(params)
+    except TypeError:
+        return params
+    if any(isinstance(p, tuple) and p and p[0] == 'with_provider_metadata' for p in pairs):
+        return pairs
+    return pairs + [('with_provider_metadata', 'false')]
 
 
 def _auth_locked(method):
@@ -3270,6 +3316,11 @@ class RomMClient:
         # The device a QR pairing's token is bound to (RomM creates one per
         # approval). Set by device_auth_poll on success.
         self.paired_device_id = None
+        # The server-side id of the token the last pairing issued (both
+        # routes return it). Needed to revoke that token on log out: a
+        # device-bound token can list the account's tokens but several can
+        # share one device, so it can't pick itself out afterwards.
+        self.paired_token_id = None
 
         # OAuth2 token storage
         self.access_token = None
@@ -3495,8 +3546,10 @@ class RomMClient:
                 timeout=15,
             )
             if resp.status_code in (200, 201):
-                raw = resp.json().get('raw_token')
+                body = resp.json() or {}
+                raw = body.get('raw_token')
                 if raw:
+                    self.paired_token_id = body.get('id')
                     print("✅ Pairing code exchanged for Client API Token")
                     return raw
                 print("⚠️ Exchange succeeded but no raw_token in response")
@@ -3575,6 +3628,7 @@ class RomMClient:
                 token = body.get('access_token')
                 if token:
                     self.paired_device_id = body.get('device_id')
+                    self.paired_token_id = body.get('id')
                     print("✅ Device authorization approved")
                     return ('approved', token)
                 return ('error', 'Approved but no token returned')
@@ -3874,6 +3928,38 @@ class RomMClient:
             print(f"Error getting device: {e}")
             return None
 
+    def get_rom_identifiers(self):
+        """Every ROM id the server holds for this user, as a set; None when it
+        can't say (offline, an error, a server without the route).
+
+        One small response: 20,168 ids in 0.17s and 120KB on RomM 5.5. It is
+        what turns "a platform shrank" into "these games were deleted" without
+        walking the platform; see Plugin._removals_by_identifiers.
+        """
+        if not self.ensure_authenticated():
+            return None
+        try:
+            r = self.session.get(urljoin(self.base_url, '/api/roms/identifiers'), timeout=60)
+            if r.status_code != 200:
+                logging.info(f"rom identifiers unavailable: HTTP {r.status_code}")
+                return None
+            ids = r.json()
+            if not isinstance(ids, list):
+                return None
+            return {int(i) for i in ids}
+        except Exception as e:
+            logging.info(f"rom identifiers unavailable: {e}")
+            return None
+
+    @property
+    def library_page_size(self):
+        """Rows per page of a library walk for this server; see
+        LIBRARY_PAGE_SIZE_5_5. The old size until the heartbeat is read."""
+        version = (getattr(self, 'server_features', None) or {}).get('version')
+        if server_version_at_least(version, (5, 5, 0)):
+            return LIBRARY_PAGE_SIZE_5_5
+        return LIBRARY_PAGE_SIZE
+
     def get_server_features(self):
         """Read /api/heartbeat once and keep what Ludo cares about.
 
@@ -3968,6 +4054,28 @@ class RomMClient:
 
         except Exception as e:
             print(f"Error updating device: {e}")
+            return False
+
+    def revoke_client_token(self, token_id):
+        """Revoke the Client API Token this client signs in with.
+
+        RomM lets a client token revoke itself without me.write. Returns True
+        when the token is gone (200, or 404/401 because it already was).
+        """
+        if not token_id:
+            return False
+        try:
+            response = self.session.delete(
+                urljoin(self.base_url, f'/api/client-tokens/{token_id}'),
+                timeout=10,
+            )
+            if response.status_code in (200, 204, 401, 404):
+                print(f"✅ Client token {token_id} revoked")
+                return True
+            print(f"Failed to revoke client token {token_id}: HTTP {response.status_code}")
+            return False
+        except Exception as e:
+            print(f"Error revoking client token: {e}")
             return False
 
     def delete_device(self, device_id):
@@ -4706,7 +4814,7 @@ class RomMClient:
                 # Bigger pages keep helping in theory, but ~11.5s is the floor
                 # for any shape on a 3k library, and one giant request loses
                 # both progress reporting and per-page retry.
-                chunk_size = LIBRARY_PAGE_SIZE
+                chunk_size = self.library_page_size
                 total_chunks = (total_games + chunk_size - 1) // chunk_size
 
                 scope = "changed games" if updated_after else "games"
@@ -4830,7 +4938,7 @@ class RomMClient:
                     name = (platform.get('display_name') or platform.get('name')
                             or platform.get('slug') or 'Unknown')
                     slug = platform.get('slug') or platform.get('fs_slug')
-                    pages_needed = (count + LIBRARY_PAGE_SIZE - 1) // LIBRARY_PAGE_SIZE
+                    pages_needed = (count + self.library_page_size - 1) // self.library_page_size
 
                     # This platform's slice of the checkpoint, re-keyed to the
                     # plain offsets _fetch_pages_parallel expects. Keeping the
@@ -4849,7 +4957,7 @@ class RomMClient:
                         progress_callback('page', f'⟳ {name} ({index + 1}/{platform_total})')
 
                     games = self._fetch_pages_parallel(
-                        count, LIBRARY_PAGE_SIZE, pages_needed, progress_callback,
+                        count, self.library_page_size, pages_needed, progress_callback,
                         trim_fields, platform_resume, platform_sink,
                         platform_id=pid, loaded_base=loaded_base,
                         progress_extra={
@@ -4944,9 +5052,10 @@ class RomMClient:
                 self.last_fetch_incomplete = False
                 return [], 0
 
-            pages_needed = (rom_count + LIBRARY_PAGE_SIZE - 1) // LIBRARY_PAGE_SIZE
+            page_size = self.library_page_size
+            pages_needed = (rom_count + page_size - 1) // page_size
             games = self._fetch_pages_parallel(
-                rom_count, LIBRARY_PAGE_SIZE, pages_needed, progress_callback,
+                rom_count, page_size, pages_needed, progress_callback,
                 trim_fields, platform_id=platform_id,
                 progress_extra={'total': rom_count})
 
@@ -6311,10 +6420,12 @@ class RomMClient:
         once it turned out to feed nothing but a log line. Kept because this
         module is shared verbatim with romm-retroarch-sync.
 
-        `device_id` only filters `saves`. /api/states declares no such
-        parameter (measured against 5.3.0, and the same in 5.2.0), and unknown
-        query params are dropped silently, so a states call answers with every
-        state for the scope regardless of the device asked for.
+        `device_id` only filters `saves`. GET /api/states declares no such
+        parameter (measured against 5.3.0 and 5.2.0; 5.5 still takes only
+        rom_id/rom_ids/platform_id), and unknown query params are dropped
+        silently, so a states call answers with every state for the scope
+        regardless of the device asked for. (Since 5.5 POST /api/states does
+        take device_id and stores it as origin_device_id; upload_save sends it.)
 
         Args:
             device_id: The device ID to filter by
@@ -6455,6 +6566,17 @@ class RomMClient:
             return "autosave", True, 10
 
         return None, False, None
+
+    @staticmethod
+    def _held_by_channel(response):
+        """True for RomM 5.5's 409 on a save or state a sync channel holds:
+        the file now changes only through a snapshot push. Not a sign the
+        server is newer, so it must never trigger a download over it."""
+        try:
+            detail = (response.json() or {}).get('detail')
+        except Exception:
+            detail = response.text
+        return isinstance(detail, str) and 'sync channel' in detail.lower()
 
     @staticmethod
     def compute_content_hash(file_path):
@@ -6687,6 +6809,8 @@ class RomMClient:
                         logging.info(f"Upload conflict (409): {message} (type: {error_type})")
                     except:
                         logging.info(f"Upload conflict (409): {response.text[:200]}")
+                    if RomMClient._held_by_channel(response):
+                        return 'channel_held'
                     return 'conflict'
 
                 elif response.status_code == 422:
@@ -6750,8 +6874,8 @@ class RomMClient:
             save_state_id, server_filename = self.upload_save_and_get_id(rom_id, save_type, file_path, emulator, device_id, overwrite, slot, autocleanup, autocleanup_limit)
 
             # Propagate conflict status
-            if save_state_id == 'conflict':
-                return 'conflict'
+            if save_state_id in ('conflict', 'channel_held'):
+                return save_state_id
 
             if not save_state_id:
                 return self.upload_save(rom_id, save_type, file_path, emulator, device_id, overwrite, slot, autocleanup, autocleanup_limit)
@@ -6935,6 +7059,8 @@ class RomMClient:
                         logging.info(f"Upload conflict (409): {message} (type: {error_type})")
                     except:
                         logging.info(f"Upload conflict (409): {response.text[:200]}")
+                    if RomMClient._held_by_channel(response):
+                        return 'channel_held', None
                     return 'conflict', None
                 else:
                     logging.warning(f"Upload failed ({response.status_code}): {response.text[:200]}")
@@ -11881,6 +12007,49 @@ class RetroArchInterface:
         cache[key] = found
         return found
 
+    def core_library_id(self, romm_emulator_name):
+        """The core's library name without "_libretro" ("mgba",
+        "mednafen_psx_hw"), which keys a snapshot's states bank the way
+        Argosy keys it. None when no installed core's .info file matches.
+
+        Ludo records the emulator as RomM spells it, which is sometimes the
+        library name already ("mgba") and sometimes the folder RetroArch
+        sorts into ("beetle_psx_hw" for "Beetle PSX HW"), so both are tried.
+        """
+        if not romm_emulator_name:
+            return None
+        cache = self.__dict__.setdefault('_library_id_cache', {})
+        key = romm_emulator_name.lower()
+        if key in cache:
+            return cache[key]
+        found = None
+        try:
+            info_dir = self.get_retroarch_config_setting('libretro_info_path', '')
+            if not info_dir:
+                cfg_dir = self.find_retroarch_config_dir()
+                info_dir = cfg_dir / 'info' if cfg_dir else None
+            info_dir = Path(info_dir) if info_dir else None
+            if info_dir and info_dir.is_dir():
+                for stem in dict.fromkeys((key, key.replace('_', ''))):
+                    if (info_dir / f'{stem}_libretro.info').is_file():
+                        found = stem
+                        break
+                if not found:
+                    folder = (self.get_retroarch_directory_name(romm_emulator_name) or '').lower()
+                    for info in sorted(info_dir.glob('*_libretro.info')):
+                        for line in info.read_text(errors='replace').splitlines():
+                            name, sep, value = line.partition('=')
+                            if sep and name.strip() == 'corename':
+                                if value.strip().strip('"').lower() == folder:
+                                    found = info.name[:-len('_libretro.info')]
+                                break
+                        if found:
+                            break
+        except Exception:
+            found = None
+        cache[key] = found
+        return found
+
     def get_romm_emulator_name(self, retroarch_directory_name):
         """Convert RetroArch directory name to RomM emulator name using standard convention"""
         # RomM naming convention: lowercase + replace hyphens/spaces with underscores
@@ -14155,6 +14324,14 @@ class AutoSyncManager:
             elif 'state' in file_path.suffix.lower() or file_path.name.lower().endswith('.state.auto'):
                 # ".state.auto" has suffix ".auto" (no "state"), so match by name too.
                 save_type = 'states'
+                if self._state_in_channel(rom_id, file_path):
+                    # This game's states go up inside its channel snapshots,
+                    # with its save, as Argosy's do: hand over to the session
+                    # sync the way a save does.
+                    self.last_uploaded[str(file_path)] = current_fingerprint
+                    self._save_upload_fingerprints()
+                    self.trigger_session_save_sync("state changed")
+                    return
                 # Look for thumbnail for save states
                 thumbnail_path = self.retroarch.find_thumbnail_for_save_state(file_path)
             else:
@@ -14194,6 +14371,22 @@ class AutoSyncManager:
                 # user instead of reporting a failure.
                 self.log(f"📴 Offline — {file_path.name} will sync on next connection")
                 self.retroarch.send_notification("Offline — save will upload on next connection")
+            elif result == 'channel_held' and not self._state_in_channel(rom_id, file_path):
+                # Held by a channel snapshot, but no channel sync here scans
+                # this file (the game has no save to carry it, or it sits in
+                # another core's folder). Leave it pending rather than mark it
+                # synced: marking it would drop it for good.
+                self.log(f"⚠️ {file_path.name} is held by a sync channel this "
+                         f"device can't push it to yet — kept pending")
+            elif result == 'channel_held':
+                # Another client (Argosy, or this one before) put this file in
+                # a channel snapshot. The local copy is the newer one: it goes
+                # up with the next channel sync, never replaced by the server's.
+                self.last_uploaded[str(file_path)] = current_fingerprint
+                self._save_upload_fingerprints()
+                self.log(f"🔗 {file_path.name} belongs to a sync channel — "
+                         f"it syncs with the game's snapshot")
+                self.trigger_session_save_sync("state in channel")
             elif result == 'conflict':
                 self.log(f"⚠️ Server returned 409 Conflict for {file_path.name} — server has newer version, triggering download")
                 self.retroarch.send_notification(f"Sync conflict: {file_path.name}")
@@ -16711,15 +16904,40 @@ class AutoSyncManager:
                     entry['_path'], entry.get('updated_at'))
 
             try:
+                states = self._channel_states(game, entry.get('emulator')) if game else None
+            except Exception as e:
+                # States never cost the save its sync: it goes up without them.
+                logging.warning(f"[CHANNELS] states of {path.name} not read: {e}")
+                states = None
+            if states is not None:
+                # From here this game's states go up inside its snapshots;
+                # the legacy upload would answer 409 for any a snapshot holds.
+                # Only the folder _channel_states scans: a state elsewhere (another
+                # core's) can't ride this game's snapshots and keeps the legacy path.
+                if states.folder:
+                    self.__dict__.setdefault('_channel_state_dirs', {}).setdefault(
+                        rom_id, set()).add(str(Path(states.folder).resolve()))
+            try:
                 out = sync.sync(
                     rom_file['id'],
                     save_channels.SaveHashes(content_hash, content_hash),
                     load, emulator='retroarch', core=entry.get('emulator'),
                     choose=choose,
                     uploading=lambda rom_id=rom_id, path=path:
-                        self._activity_upload(rom_id, path))
+                        self._activity_upload(rom_id, path),
+                    states=states)
                 if out.kind == 'download':
-                    out = self._write_channel_download(sync, rom_file['id'], path, out)
+                    out = self._write_channel_download(sync, rom_file['id'], path, out,
+                                                       game=game, states=states)
+                elif out.kind in ('up_to_date', 'adopted') and states is not None:
+                    # In step with the channel, but a slot it banks may be
+                    # missing here (a new device, a cleared folder): refill
+                    # those, never overwriting a state on disk.
+                    # Only from the snapshot this device holds: a pinned older
+                    # snapshot must not be filled with the current one's slots.
+                    if out.snapshot:
+                        self._write_channel_states(sync, game, states, out.snapshot,
+                                                   overwrite=False)
             except Exception as e:
                 self.log(f"❌ Channel sync for {path.name} failed: {e}")
                 summary['errors'] += 1
@@ -16769,7 +16987,19 @@ class AutoSyncManager:
             self._save_upload_fingerprints()
         return keys, errored
 
-    def _write_channel_download(self, sync, rom_file_id, path, out):
+    def _state_in_channel(self, rom_id, file_path):
+        """Does a channel sync bank this state file with its game's snapshots?
+        Only states in the folder it scans do."""
+        dirs = self.__dict__.get('_channel_state_dirs', {}).get(rom_id)
+        if not dirs:
+            return False
+        try:
+            return str(Path(file_path).parent.resolve()) in dirs
+        except OSError:
+            return False
+
+    def _write_channel_download(self, sync, rom_file_id, path, out, game=None,
+                                states=None):
         """Write a channel's current save over the local one, in place.
 
         In place, because the local file is the one the emulator reads; the
@@ -16777,12 +17007,27 @@ class AutoSyncManager:
         A local copy holding work the server lacks is kept beside it first.
         """
         save = (out.snapshot or {}).get('save')
+        data = None
+        if save:
+            # Fetched before any state is written: a save that fails to
+            # download after its states landed would leave states newer than
+            # the held bank, read next sync as local play (a false conflict).
+            data = sync.api.save_content(save['id'])
+            if data is None:
+                return save_channels.ChannelOutcome('failed', reason='download failed')
+        if states is not None and not self._write_channel_states(
+                sync, game, states, out.snapshot, overwrite=True, backup=out.backup):
+            # States before the save is held: a save held without its states
+            # would never fetch the missing ones again.
+            return save_channels.ChannelOutcome('failed', reason='state download failed')
         if not save:
-            # A snapshot of states only: no save to write.
-            return save_channels.ChannelOutcome('up_to_date', channel=out.channel)
-        data = sync.api.save_content(save['id'])
-        if data is None:
-            return save_channels.ChannelOutcome('failed', reason='download failed')
+            # A snapshot of states only (another client may push one): its
+            # states are written above, the local save stays as it is.
+            if states is None:
+                return save_channels.ChannelOutcome('up_to_date', channel=out.channel)
+            sync.finish_download(rom_file_id, out.channel, out.snapshot)
+            return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
+                                                channel=out.channel)
         if out.backup and path.exists():
             stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
             shutil.copy2(path, path.with_suffix(path.suffix + f".local-{stamp}"))
@@ -16793,6 +17038,106 @@ class AutoSyncManager:
         self.log(f"⬇️ {path.name} ← channel {(out.channel or {}).get('label')!r}")
         return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
                                             channel=out.channel)
+
+    def _channel_states(self, game, emulator):
+        """This game's states on disk as save_channels.LocalStates, under the
+        core RetroArch runs it with, or None when that core has no libretro
+        library name to bank them under (they keep the legacy path then).
+
+        Only the folder RetroArch reads for this core is scanned: a state in
+        another core's folder is that core's, and no core loads another's.
+        """
+        core = self.retroarch.core_library_id(emulator) if emulator else None
+        if not core:
+            return None
+        _, target_dir, stem = self.state_location_for_game(game, emulator)
+        if not target_dir:
+            return None
+        stems = self._state_stems_for_game(game) or [stem]
+        parts = {}
+        try:
+            files = sorted(target_dir.iterdir()) if target_dir.is_dir() else []
+        except OSError:
+            files = []
+        # Best stem first: the name the launch reads wins a slot both carry.
+        for candidate in stems:
+            for f in files:
+                if not f.name.startswith(candidate + '.state') or not f.is_file():
+                    continue
+                slot = save_channels.state_slot(f.name[len(candidate):])
+                if slot is None or slot in parts:
+                    continue
+                digest = RomMClient.compute_content_hash(f)
+                if not digest:
+                    continue
+                shot = f.with_name(f.name + '.png')
+                parts[slot] = save_channels.StatePart(
+                    slot, f, digest, shot if shot.is_file() else None)
+        return save_channels.LocalStates(
+            core, tuple(parts[k] for k in sorted(parts)), folder=target_dir, stem=stems[0])
+
+    def _write_channel_states(self, sync, game, states, snapshot, overwrite,
+                              backup=False):
+        """Write ``snapshot``'s states for ``states.core`` where RetroArch reads
+        them, each with its screenshot. True unless a download failed.
+
+        ``overwrite`` False only fills slots missing on disk. A slot the
+        snapshot doesn't bank is left alone, never deleted: the bank may come
+        from a client that only syncs some slots. ``backup`` keeps a differing
+        local state beside the new one, as a downloaded save does.
+        """
+        bank = ((snapshot or {}).get('states') or {}).get(states.core) or {}
+        if not bank:
+            return True
+        target_dir, stem = states.folder, states.stem
+        if not target_dir or not stem:
+            return True
+        have = {p.slot: p for p in states.parts}
+        written = 0
+        for slot, remote in bank.items():
+            suffix = save_channels.state_suffix(slot)
+            if not suffix or not (remote or {}).get('download_path'):
+                continue
+            local = have.get(slot)
+            shot_path = ((remote.get('screenshot') or {}).get('download_path'))
+            if local is not None and (not overwrite
+                                      or local.content_hash == remote.get('content_hash')):
+                # Same state, lost thumbnail: bring back just the PNG. A local
+                # state that differs keeps its own (or no) thumbnail.
+                png = local.path.with_name(local.path.name + '.png')
+                if (shot_path and local.content_hash == remote.get('content_hash')
+                        and not png.exists()):
+                    self._write_state_png(sync, shot_path, png)
+                continue
+            dest = local.path if local is not None else target_dir / f'{stem}{suffix}'
+            data = sync.api.download(remote['download_path'])
+            if data is None:
+                self.log(f"❌ Could not download state slot {slot} of {dest.name}")
+                return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if local is not None and backup:
+                stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+                shutil.copy2(dest, dest.with_name(dest.name + f'.local-{stamp}'))
+            tmp = dest.with_name(dest.name + '.part')
+            tmp.write_bytes(data)
+            os.replace(tmp, dest)
+            if shot_path:
+                self._write_state_png(sync, shot_path, dest.with_name(dest.name + '.png'))
+            written += 1
+        if written:
+            self.log(f"⬇️ {written} state(s) for {game.get('name') or stem} "
+                     f"← {states.core}")
+        return True
+
+    @staticmethod
+    def _write_state_png(sync, shot_path, png):
+        shot = sync.api.download(shot_path)
+        if shot is None:
+            return False
+        tmp = png.with_name(png.name + '.part')
+        tmp.write_bytes(shot)
+        os.replace(tmp, png)
+        return True
 
     def run_negotiated_save_sync(self, conflict_resolver=None, trigger="", only_rom_id=None):
         # RPC-triggered conflict/re-pair syncs run outside our worker threads.
@@ -16962,6 +17307,13 @@ class AutoSyncManager:
                             _bump(rom_id, 'up')
                             if self._record_synced(entry['_path']):
                                 _fp_dirty = True
+                        elif ok == 'channel_held':
+                            # A channel snapshot holds this slot (RomM 5.5); only
+                            # the autosave goes up through channels here. Not an
+                            # error, and not synced either: it stays pending.
+                            summary['channel_held'] = summary.get('channel_held', 0) + 1
+                            self.log(f"🔗 {Path(entry['_path']).name} is held by a "
+                                     f"sync channel — left as it is")
                         elif ok == 'rom_gone':
                             # The ROM was deleted on the server. Flag it via
                             # the backend so the entry goes orphaned — the next
@@ -18580,7 +18932,7 @@ class AutoSyncManager:
             # uploaded-by-this-device set (another device may have uploaded a
             # newer version of the same id). The two queries fed nothing but a
             # log line, and the states one could not even answer the question
-            # asked: /api/states takes no device_id, so it returned every state
+            # asked: GET /api/states takes no device_id, so it returned every state
             # for the rom and reported them all as "already on device".
 
             # Get user preference for overwrite behavior

@@ -23,7 +23,10 @@ Asserted:
     by the chooser (on top of the current, or the server's with a backup),
     and nothing is held until a download is written;
   * the session sync sends eligible saves through channels, keeps the rest
-    on negotiate, and ignores negotiate's ops for a channel's save.
+    on negotiate, and ignores negotiate's ops for a channel's save;
+  * states bank with the save under Argosy's keys (library core, 'auto' or
+    the slot number): a changed state alone is pushed, only bytes the server
+    lacks go up with their screenshots, and no slot is ever dropped.
 """
 import sys
 import tempfile
@@ -37,8 +40,9 @@ from romm_sync_engine import sync_core  # noqa: E402
 from romm_sync_engine.sync_core import AutoSyncManager  # noqa: E402
 from romm_sync_engine.save_channels import (  # noqa: E402
     Action, ChannelStore, ChannelSync, PushResult, SaveHashes, SaveUnit, SnapshotApi, SnapshotPoint,
-    build_manifest, decide, pick_channel, rom_file_for_save, snapshot_point,
-    snapshots_supported,
+    LocalStates, StatePart, bank_of, build_manifest, decide, merged_bank, pick_channel,
+    rom_file_for_save, snapshot_point, snapshots_supported, state_slot, state_suffix,
+    states_dirty,
 )
 
 FAILURES = []
@@ -221,6 +225,145 @@ def test_manifest():
     check('downgrade approval', m.get('approve_hardcore_downgrade'), True)
 
 
+def _state(slot, h, shot=None):
+    return StatePart(slot, Path(f'/s/g{state_suffix(slot)}'), h, shot)
+
+
+def _snap_states(sid, h, bank):
+    snap = _snap(sid, h)
+    snap['states'] = {core: {slot: {'content_hash': hh, 'download_path': f'/dl/{core}/{slot}'}
+                             for slot, hh in slots.items()} for core, slots in bank.items()}
+    return snap
+
+
+def test_states():
+    # Slot names, both ways, as Argosy's LibretroStateSlots reads them.
+    check('slot of .state', state_slot('.state'), '0')
+    check('slot of .state3', state_slot('.state3'), '3')
+    check('slot of .state.auto', state_slot('.STATE.AUTO'), 'auto')
+    check('png is no slot', state_slot('.state1.png'), None)
+    check('suffixes', [state_suffix(x) for x in ('0', '3', 'auto', 'x')],
+          ['.state', '.state3', '.state.auto', None])
+
+    snap = _snap_states(4, 'mine', {'mgba': {'auto': 'a1', '1': 's1'}, 'vba_next': {'0': 'v'}})
+    check('bank_of', bank_of(snap), {'mgba': {'auto': 'a1', '1': 's1'}, 'vba_next': {'0': 'v'}})
+
+    held = {'mgba': {'auto': 'a1', '1': 's1'}}
+    same = LocalStates('mgba', (_state('auto', 'a1'),))
+    check('missing slot is not a change', states_dirty(held, same), False)
+    check('changed slot is', states_dirty(held, LocalStates('mgba', (_state('auto', 'a2'),))), True)
+    check('new slot is', states_dirty(held, LocalStates('mgba', (_state('2', 'n'),))), True)
+    check('no states', states_dirty(held, LocalStates('mgba')), False)
+    check('merge keeps the bank slots', merged_bank(held, LocalStates('mgba', (_state('auto', 'a2'),))),
+          {'auto': 'a2', '1': 's1'})
+
+    # decide: a state alone moves a clean save.
+    cur = SnapshotPoint(5, A)
+    check('state change pushes', decide(cur, cur, A, states_dirty=True),
+          Action('push', expected_current_id=5, parent_id=5))
+    check('state change on an old snapshot conflicts',
+          decide(SnapshotPoint(4, A), cur, A, states_dirty=True).kind, 'conflict')
+
+    # Manifest: only the local core, merged; nothing for hardcore.
+    local = LocalStates('mgba', (_state('auto', 'a2'),))
+    m = build_manifest(1, {'id': 'c1'}, Action('push', expected_current_id=5), states=local,
+                       current_bank=held)
+    check('manifest states', m.get('states'), {'mgba': {'auto': 'a2', '1': 's1'}})
+    m = build_manifest(1, {'id': 'c1'}, Action('push', expected_current_id=5), states=local,
+                       current_bank=held, is_hardcore=True)
+    check('hardcore sends no states', 'states' in m, False)
+    m = build_manifest(1, {'id': 'c1'}, Action('push', expected_current_id=5),
+                       states=LocalStates('mgba'), current_bank=held)
+    check('no local states carries the bank', 'states' in m, False)
+
+    # Store: the hold records the bank.
+    with tempfile.TemporaryDirectory() as d:
+        store = ChannelStore(Path(d) / 's.json')
+        store.hold(7, 'c1', 'default', snap)
+        check('held bank persists', ChannelStore(Path(d) / 's.json').get(7).held_states, bank_of(snap))
+
+        # A state played on, save unchanged: pushed with the state.
+        mine = SaveHashes('mine', 'mine')
+        unit = lambda: SaveUnit(b'x', 'g.srm', 'mine', 'mine')  # noqa: E731
+        api = FakeApi([{'id': 'c1', 'label': 'default', 'current': snap}],
+                      [PushResult('written', snapshot=_snap_states(5, 'mine', {'mgba': {'auto': 'a2', '1': 's1'}}))])
+        out = ChannelSync(api, store).sync(7, mine, unit, states=local)
+        check('state-only change pushes', out.kind, 'pushed')
+        check('pushed bank', api.manifests[0]['states'], {'mgba': {'auto': 'a2', '1': 's1'}})
+        check('server hashes passed', api.pushed_states[1], {'a1', 's1', 'v'})
+        check('new bank held', store.get(7).held_states['mgba']['auto'], 'a2')
+
+        api = FakeApi([{'id': 'c1', 'label': 'default',
+                        'current': _snap_states(5, 'mine', {'mgba': {'auto': 'a2', '1': 's1'}})}])
+        check('then in step', ChannelSync(api, store).sync(7, mine, unit, states=local).kind, 'up_to_date')
+
+        # The refill source: the held snapshot only while it is the current.
+        out = ChannelSync(api, store).sync(7, mine, unit, states=LocalStates('mgba'))
+        check('in step carries the held snapshot', (out.snapshot or {}).get('id'), 5)
+        store.hold(7, 'c1', 'default', _snap_states(3, 'mine', {'mgba': {'auto': 'old'}}),
+                   by_choice=True)
+        api = FakeApi([{'id': 'c1', 'label': 'default',
+                        'current': _snap_states(5, 'mine', {'mgba': {'auto': 'a2'}})}])
+        out = ChannelSync(api, store).sync(7, mine, unit, states=LocalStates('mgba'))
+        check('pinned older snapshot stays', out.kind, 'up_to_date')
+        check('pinned older snapshot refills nothing', out.snapshot, None)
+
+    # An entry held before states were banked: its bank is unknown.
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / 's.json'
+        path.write_text('{"7": {"channel_id": "c1", "label": "default", '
+                        '"held_snapshot_id": 4, "held_content_hash": "mine", '
+                        '"held_identity_hash": "mine"}}')
+        check('old entry loads unknown', ChannelStore(path).get(7).held_states, None)
+        mine = SaveHashes('mine', 'mine')
+        unit = lambda: SaveUnit(b'x', 'g.srm', 'mine', 'mine')  # noqa: E731
+        api = FakeApi([{'id': 'c1', 'label': 'default',
+                        'current': _snap_states(5, 'theirs', {'mgba': {'auto': 'b'}})}])
+        out = ChannelSync(api, ChannelStore(path)).sync(7, mine, unit, states=local)
+        check('old entry + moved channel downloads, no false conflict', out.kind, 'download')
+        api = FakeApi([{'id': 'c1', 'label': 'default', 'current': _snap_states(4, 'mine', {})}],
+                      [PushResult('written', snapshot=_snap_states(6, 'mine', {'mgba': {'auto': 'a2'}}))])
+        out = ChannelSync(api, ChannelStore(path)).sync(7, mine, unit, states=local)
+        check('old entry in step banks its states', out.kind, 'pushed')
+
+
+def test_state_parts():
+    class Resp:
+        def __init__(self, status, body):
+            self.status_code, self._body, self.text = status, body, ''
+
+        def json(self):
+            return self._body
+
+    class Session:
+        def __init__(self, replies):
+            self.replies, self.sent = list(replies), []
+
+        def post(self, url, files, params, timeout):
+            self.sent.append([name for name, _ in files])
+            return self.replies.pop(0)
+
+    class Client:
+        base_url = 'http://romm'
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        for name in ('g.state.auto', 'g.state.auto.png', 'g.state1'):
+            (d / name).write_bytes(name.encode())
+        auto = StatePart('auto', d / 'g.state.auto', 'new', d / 'g.state.auto.png')
+        one = StatePart('1', d / 'g.state1', 'old')
+        states = LocalStates('mgba', (auto, one))
+        client = Client()
+        client.session = Session([Resp(400, {'missing': ['state:mgba:1']}), Resp(201, {'id': 6})])
+        r = SnapshotApi(client).push({'rom_file_id': 1}, save=None, states=states,
+                                     server_state_hashes={'old'})
+        check('only unknown states go up, with screenshot', client.session.sent[0],
+              ['manifest', 'state:mgba:auto', 'state:mgba:auto:screenshot'])
+        check('a named missing state is re-sent', client.session.sent[1],
+              ['manifest', 'state:mgba:auto', 'state:mgba:auto:screenshot', 'state:mgba:1'])
+        check('state push result', r.kind, 'written')
+
+
 class FakeApi:
     """The channel routes, answering from canned replies."""
 
@@ -234,8 +377,10 @@ class FakeApi:
     def list_channels(self, ids):
         return self.channels
 
-    def push(self, manifest, save=None, screenshot=None, server_has_save=False):
+    def push(self, manifest, save=None, screenshot=None, server_has_save=False,
+             states=None, server_state_hashes=()):
         self.manifests.append(manifest)
+        self.pushed_states = (states, set(server_state_hashes))
         return self.pushes.pop(0)
 
     def get_snapshot(self, sid, hold=False):
@@ -561,6 +706,8 @@ def main():
     test_push_retry()
     test_manifest()
     test_channel_sync()
+    test_states()
+    test_state_parts()
     test_session_routing()
     test_indicator_and_rejects()
     test_ask_on_conflict()

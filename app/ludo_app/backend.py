@@ -1665,7 +1665,7 @@ class LudoBackend:
         not be written.
         """
         try:
-            page_size = LIBRARY_PAGE_SIZE
+            page_size = getattr(self._romm_client, 'library_page_size', LIBRARY_PAGE_SIZE)
             pages = -(-total // page_size) if total else None
             record = {
                 'seconds': round(seconds, 2),
@@ -2300,7 +2300,7 @@ class LudoBackend:
                     # Replay whatever an interrupted attempt already fetched. The
                     # page size has to match what _fetch_all_games_chunked will
                     # use, or the checkpoint is correctly rejected as mismatched.
-                    resumed = (self._resume_begin(known_total, LIBRARY_PAGE_SIZE)
+                    resumed = (self._resume_begin(known_total, self._romm_client.library_page_size)
                                if known_total else {})
                     roms_result = self._romm_client.get_roms(
                         progress_callback=_on_fetch_progress,
@@ -6158,6 +6158,15 @@ class LudoBackend:
             if not SYNC_CORE_AVAILABLE:
                 return {'success': False, 'error': 'sync_core not available'}
 
+            # Captured before anything below drops the client or its settings;
+            # revoked once sync has stopped, so no running request hits a 401.
+            pre = SettingsManager()
+            retired = None
+            if pre.get('RomM', 'client_token', ''):
+                old_id = (pre.get('RomM', 'client_token_id', '') or '').strip()
+                if old_id:
+                    retired = (self._romm_client, old_id)
+
             result = {'success': True, 'deleted_roms': 0, 'deleted_bios': 0}
             if wipe_data:
                 # reset_all_settings deletes ROMs/BIOS, clears sync state, and
@@ -6165,12 +6174,15 @@ class LudoBackend:
                 result = await self.reset_all_settings()
             else:
                 self._stop_sync()
+            if retired:
+                await self._revoke_token(*retired)
 
+            settings = SettingsManager()
             # Clear credentials so configured == False. Keep url/username so the
             # wizard can pre-fill the server for a quick log back in.
-            settings = SettingsManager()
             settings.set('RomM', 'password', '')
             settings.set('RomM', 'client_token', '')
+            settings.set('RomM', 'client_token_id', '')
             settings.set('RomM', 'auto_connect', 'false')
 
             with self._rpc_state_lock:
@@ -6193,6 +6205,29 @@ class LudoBackend:
         except Exception as e:
             logging.error(f"logout error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    async def _revoke_token(client, token_id):
+        """Revoke ``token_id`` through ``client``, which signs in with it.
+
+        Best effort, never blocking log out or re-pair: offline or a failed
+        call just logs. Installs paired before token ids were recorded have
+        none, and their token is left alone.
+        """
+        if not (client and getattr(client, 'client_token', None)):
+            logging.info("[AUTH] not connected; client token left on the server")
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+            ok = await asyncio.wait_for(
+                loop.run_in_executor(None, client.revoke_client_token, token_id),
+                timeout=15)
+        except Exception as e:
+            logging.warning(f"[AUTH] revoking client token failed: {e}")
+            return False
+        if ok:
+            logging.info(f"[AUTH] revoked client token {token_id}")
+        return bool(ok)
 
     def _push_device_name(self, device_id, remote=None):
         """Tell RomM what this device is called. Blocking; call off the loop.
@@ -6668,16 +6703,17 @@ class LudoBackend:
             if not code or not str(code).strip():
                 return {'success': False, 'message': 'Pairing code is required'}
 
-            token = RomMClient(url).exchange_pair_code(str(code).strip())
+            exchanger = RomMClient(url)
+            token = exchanger.exchange_pair_code(str(code).strip())
             if not token:
                 return {'success': False, 'message': 'Invalid or expired pairing code'}
 
-            return await self._apply_pairing(url, token)
+            return await self._apply_pairing(url, token, exchanger.paired_token_id)
         except Exception as e:
             logging.error(f"pair_device error: {e}", exc_info=True)
             return {'success': False, 'message': str(e)}
 
-    async def _apply_pairing(self, url, token):
+    async def _apply_pairing(self, url, token, token_id=None):
         """Store a freshly obtained Client API Token and start connecting.
 
         Shared by both pairing routes — the typed 8-digit code and the QR device
@@ -6696,8 +6732,20 @@ class LudoBackend:
                      or (settings.get('RomM', 'username')
                          and settings.get('RomM', 'password')))
                 and not ds_before.get('needs_onboarding'))
+            # A re-pair replaces the token; the one it replaces is revoked
+            # below, once sync has stopped using it, so re-pairing doesn't
+            # leave a live token behind each time.
+            retired = None
+            old_id = (settings.get('RomM', 'client_token_id', '') or '').strip()
+            if (old_id and old_id != str(token_id or '')
+                    and settings.get('RomM', 'client_token', '') not in ('', token)
+                    and (settings.get('RomM', 'url', '') or '').rstrip('/') == url.rstrip('/')):
+                retired = (self._romm_client, old_id)
             settings.set('RomM', 'url', url)
             settings.set('RomM', 'client_token', token)
+            # Always overwrite: a stale id from the previous pairing would
+            # revoke a token this install no longer uses.
+            settings.set('RomM', 'client_token_id', str(token_id or ''))
             settings.set('RomM', 'auto_connect', 'true')
             # Clear the onboarding flag so get_config() reports configured — pairing
             # is a complete setup path (save_config does the same for password auth).
@@ -6714,6 +6762,8 @@ class LudoBackend:
             # route for password auth; pairing was the odd one out.
             self._stop_sync()
             await asyncio.sleep(0.5)
+            if retired:
+                await self._revoke_token(*retired)
             # A paired token can be a different account than the one the
             # cached /api/users/me answer describes.
             self._invalidate_account_user_cache()
@@ -6860,7 +6910,8 @@ class LudoBackend:
                     self._install_not_bound = False
                     logging.info(f"[DEVICE] adopted the paired device "
                                  f"{poller.paired_device_id}")
-                result = await self._apply_pairing(state['url'], value)
+                result = await self._apply_pairing(state['url'], value,
+                                                   poller.paired_token_id)
                 return {**result, 'status': 'approved'}
             if status == 'slow_down':
                 # The server is asking us to back off; widen the interval the
@@ -7662,6 +7713,80 @@ class LudoBackend:
                     out[pid] = mark
         return out
 
+    @staticmethod
+    def _removals_by_identifiers(games, platform_id, dropped, server_ids):
+        """The rom_ids to remove for a platform that shrank by ``dropped``, or
+        None when a walk has to settle it.
+
+        The local ids of the platform (each entry's rom_id and its siblings')
+        that the server no longer lists are what was deleted. They account for
+        the drop only when their number equals it: fewer means something was
+        also added or never held here, more means the count and the id list
+        disagree. Either way, walk. A deleted id inside a sibling group walks
+        too: removing it changes which ROM leads the group, which only the
+        walk's grouping decides.
+        """
+        if dropped <= 0 or server_ids is None:
+            return None
+        local, standalone = set(), {}
+        for g in games:
+            romm = g.get('romm_data') or {}
+            # An orphan already left the server; it is not part of this drop.
+            if (romm.get('platform_id') != platform_id or not g.get('rom_id')
+                    or g.get('is_orphan')):
+                continue
+            sibs = {s.get('id') for s in (romm.get('sibling_roms') or [])
+                    if isinstance(s, dict) and s.get('id') is not None}
+            local.add(g['rom_id'])
+            local |= sibs
+            if not sibs:
+                standalone[g['rom_id']] = g
+        missing = local - server_ids
+        if len(missing) != dropped or not missing <= set(standalone):
+            return None
+        return missing
+
+    def _drop_deletions_by_identifiers(self, changed, baselines, fresh_marks,
+                                       force_platforms, stats):
+        """Settle pure deletions without a walk; return the platforms left to walk.
+
+        A platform that shrank and isn't forced (nothing new came back from
+        updated_after) most likely only lost games. /api/roms/identifiers names
+        them in one small call, so a 17k-ROM platform losing one game costs
+        0.2s instead of re-reading all 17k. Anything the ids don't fully
+        explain is left in ``changed`` and walked as before.
+        """
+        shrunk = [(pid, p, c) for pid, p, c in changed
+                  if baselines.get(pid) is not None and c < baselines[pid]
+                  and not (force_platforms and pid in force_platforms)]
+        if not shrunk:
+            return changed
+        server_ids = self._romm_client.get_rom_identifiers()
+        if server_ids is None:
+            return changed
+        settled, gone = set(), set()
+        for pid, platform, count in shrunk:
+            removed = self._removals_by_identifiers(
+                self._available_games, pid, baselines[pid] - count, server_ids)
+            if removed is None:
+                continue
+            gone |= removed
+            settled.add(pid)
+            self._library_platform_totals[pid] = count
+            if pid in fresh_marks:
+                self._library_platform_marks[pid] = fresh_marks[pid]
+            logging.info(f"Reconcile: {platform.get('slug') or pid} lost "
+                         f"{len(removed)} game(s), removed without a walk")
+        if gone:
+            before = self._available_games
+            games = [g for g in before if g.get('rom_id') not in gone]
+            # The same orphan veto as every other delete path.
+            kept = self._preserve_orphaned_downloads(games, before)
+            stats['removed'] += len(gone) - kept
+            self._available_games = games
+            stats.setdefault('settled_by_ids', []).extend(sorted(settled))
+        return [c for c in changed if c[0] not in settled]
+
     def _reconcile_platforms(self, only_platform=None, force_platforms=None) -> dict:
         """Bring the library back in step with the server, one platform at a time.
 
@@ -7765,6 +7890,9 @@ class LudoBackend:
         marks.update(adopt)
 
         stats['checked'] = len(platforms) if only_platform is None else len(changed)
+        if changed and only_platform is None:
+            changed = self._drop_deletions_by_identifiers(
+                changed, baselines, fresh_marks, force_platforms, stats)
         if not changed:
             return stats
 
@@ -7853,7 +7981,7 @@ class LudoBackend:
 
         after_ids = {g['rom_id'] for g in games if g.get('rom_id')}
         stats['added'] = len(after_ids - before_ids)
-        stats['removed'] = len(before_ids - after_ids)
+        stats['removed'] += len(before_ids - after_ids)
         # Rows the walk returned for ids we already had. Not "changed" — we do
         # not diff field by field — but "re-read", which is what a wholesale
         # slice replacement can honestly claim.

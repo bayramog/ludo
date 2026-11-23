@@ -19,7 +19,7 @@ and the HTTP calls. Wiring into AutoSyncManager lives in sync_core.
 import contextlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
@@ -76,12 +76,14 @@ class Action:
     parent_id: Optional[int] = None
 
 
-def decide(held, current, local):
+def decide(held, current, local, states_dirty=False):
     """The decide table from the design, for one channel.
 
     held: the SnapshotPoint this device last pushed or applied, or None.
     current: the channel's current SnapshotPoint on the server, or None.
     local: SaveHashes of the save on disk now, or None.
+    states_dirty: a state on disk differs from the held snapshot's bank, so
+    there is progress to push even when the save itself is unchanged.
 
     A missing local save never reads as a change, so a cleared save folder
     is refilled from the server rather than pushed as empty. Mirrors Argosy's
@@ -98,7 +100,7 @@ def decide(held, current, local):
         if local.same_save_as(current.save):
             return Action('adopt', snapshot_id=current.id)
         return Action('conflict', snapshot_id=current.id)
-    dirty = local is not None and not local.same_save_as(held.save)
+    dirty = local is not None and (states_dirty or not local.same_save_as(held.save))
     if held.id == current.id or held.by_choice:
         if dirty:
             return Action('push', expected_current_id=current.id,
@@ -147,6 +149,10 @@ class ChannelState:
     held_content_hash: Optional[str] = None
     held_identity_hash: Optional[str] = None
     by_choice: bool = False
+    # The held snapshot's states bank, {core: {slot: content_hash}}: what
+    # tells a state played on here from one that is already on the server.
+    # None for an entry held before states were banked: unknown, not empty.
+    held_states: Optional[dict] = None
 
     def held_point(self):
         if self.held_snapshot_id is None:
@@ -208,6 +214,7 @@ class ChannelStore:
             held_content_hash=save.get('content_hash'),
             held_identity_hash=save.get('identity_hash') or save.get('content_hash'),
             by_choice=by_choice,
+            held_states=bank_of(snapshot),
         )
         self._save()
 
@@ -276,6 +283,93 @@ class SaveUnit:
     format: str = 'native'
 
 
+# ── States ────────────────────────────────────────────────────────────────
+#
+# A snapshot carries a states bank beside its save: {core: {slot: hash}}.
+# Keys match Argosy's, so the two clients share states: the core is the
+# libretro library name without "_libretro" ("mgba", "mednafen_psx_hw"), the
+# slot "auto" for RetroArch's .state.auto, else the slot number as text
+# ("0" is the bare .state). A core the manifest lists replaces the parent's
+# bank for that core and a slot left out of it is deleted, so a push always
+# lists the current bank's slots too (merged_bank): a state is never dropped
+# because this device doesn't have it.
+
+AUTO_SLOT = 'auto'
+
+
+@dataclass(frozen=True)
+class StatePart:
+    """One state file on disk, as a bank slot."""
+    slot: str
+    path: Path
+    content_hash: str
+    screenshot: Optional[Path] = None
+
+
+@dataclass(frozen=True)
+class LocalStates:
+    """The states on disk for one game, under the core that wrote them."""
+    core: str
+    parts: tuple = ()
+    # Where RetroArch reads this core's states for the game, and the name a
+    # new slot is written under, so a download lands beside the others.
+    folder: Optional[Path] = None
+    stem: str = ''
+
+    def bank(self):
+        return {p.slot: p.content_hash for p in self.parts}
+
+
+def state_slot(suffix):
+    """Bank slot for a state file's suffix after the game's stem
+    ('.state1' -> '1'), or None for anything that isn't a state."""
+    s = (suffix or '').lower()
+    if s == '.state':
+        return '0'
+    if s == '.state.auto':
+        return AUTO_SLOT
+    if s.startswith('.state') and s[6:].isdigit():
+        return str(int(s[6:]))
+    return None
+
+
+def state_suffix(slot):
+    """The file suffix RetroArch writes a bank slot under, or None."""
+    if slot == AUTO_SLOT:
+        return '.state.auto'
+    if isinstance(slot, str) and slot.isdigit():
+        return '.state' if int(slot) == 0 else f'.state{int(slot)}'
+    return None
+
+
+def bank_of(snapshot):
+    """A snapshot dict's states as {core: {slot: content_hash}}."""
+    out = {}
+    for core, slots in ((snapshot or {}).get('states') or {}).items():
+        hashes = {slot: (st or {}).get('content_hash') for slot, st in (slots or {}).items()}
+        hashes = {k: v for k, v in hashes.items() if v}
+        if hashes:
+            out[core] = hashes
+    return out
+
+
+def states_dirty(held_bank, local):
+    """True when a state on disk isn't the one the held bank has. A slot
+    missing on disk is not a change: it is refilled, never pushed as gone."""
+    if not local or not local.parts:
+        return False
+    held = (held_bank or {}).get(local.core) or {}
+    return any(held.get(p.slot) != p.content_hash for p in local.parts)
+
+
+def merged_bank(current_bank, local):
+    """The manifest's slots for ``local.core``: the current snapshot's,
+    with this device's states on top."""
+    slots = dict((current_bank or {}).get(local.core) or {})
+    slots.update(local.bank())
+    return slots
+
+
 class SnapshotApi:
     """The channel and snapshot routes, over a RomMClient's session.
 
@@ -324,6 +418,18 @@ class SnapshotApi:
             logging.warning(f"Error fetching save {save_id}: {e}")
         return None
 
+    def download(self, download_path):
+        """The bytes behind a snapshot's ``download_path`` (a state or its
+        screenshot), or None."""
+        try:
+            r = self.client.session.get(self._url(download_path), timeout=120)
+            if r.status_code == 200:
+                return r.content
+            logging.warning(f"Download {download_path} failed: HTTP {r.status_code}")
+        except Exception as e:
+            logging.warning(f"Error downloading {download_path}: {e}")
+        return None
+
     def get_snapshot(self, snapshot_id, hold=False):
         """One snapshot. ``hold`` tells the server this device now plays
         from it; a plain fetch for browsing history holds nothing."""
@@ -339,25 +445,49 @@ class SnapshotApi:
             logging.warning(f"Error fetching snapshot {snapshot_id}: {e}")
         return None
 
-    def push(self, manifest, save=None, screenshot=None, server_has_save=False):
+    def push(self, manifest, save=None, screenshot=None, server_has_save=False,
+             states=None, server_state_hashes=()):
         """POST /api/snapshots, retrying once the two ways the design allows:
         a 400 naming parts the server lacks is re-sent with them, and a 404
-        for a pruned parent is re-sent without the parent."""
-        result, retry = self._send(manifest, None if server_has_save else save, screenshot)
+        for a pruned parent is re-sent without the parent.
+
+        ``states`` (LocalStates) go up only where the server lacks their
+        bytes: ``server_state_hashes`` are hashes it already holds, and the
+        server names any other it needs."""
+        known = set(server_state_hashes or ())
+        parts = [p for p in (states.parts if states else ()) if p.content_hash not in known]
+        core = states.core if states else None
+        result, retry = self._send(manifest, None if server_has_save else save,
+                                   screenshot, core, parts)
         if retry is None:
             return result
         missing, retry_manifest = retry
         send_save = save if (not server_has_save or 'save' in missing) else None
-        result, _ = self._send(retry_manifest or manifest, send_save, screenshot)
+        resend = [p for p in (states.parts if states else ())
+                  if p in parts or f'state:{core}:{p.slot}' in missing]
+        result, _ = self._send(retry_manifest or manifest, send_save, screenshot,
+                               core, resend)
         return result
 
-    def _send(self, manifest, save, screenshot):
+    def _send(self, manifest, save, screenshot, core=None, state_parts=()):
         files = [('manifest', (None, json.dumps(manifest), 'application/json'))]
         if save is not None:
             files.append(('save', (save.name, save.data, 'application/octet-stream')))
         if screenshot is not None and Path(screenshot).is_file():
             files.append(('save_screenshot', (Path(screenshot).name,
                                               Path(screenshot).read_bytes(), 'image/png')))
+        for part in state_parts:
+            key = f'state:{core}:{part.slot}'
+            try:
+                files.append((key, (part.path.name, part.path.read_bytes(),
+                                    'application/octet-stream')))
+            except OSError as e:
+                logging.warning(f"State {part.path.name} unreadable, not sent: {e}")
+                continue
+            if part.screenshot is not None and Path(part.screenshot).is_file():
+                files.append((key + ':screenshot', (Path(part.screenshot).name,
+                                                    Path(part.screenshot).read_bytes(),
+                                                    'image/png')))
         try:
             r = self.client.session.post(self._url('/api/snapshots'), files=files,
                                          params=self._device_params(), timeout=120)
@@ -400,12 +530,15 @@ def _json_or_none(response):
 
 def build_manifest(rom_file_id, channel, action, save=None, emulator=None,
                    core=None, is_hardcore=False, label=None,
-                   approve_hardcore_downgrade=False):
+                   approve_hardcore_downgrade=False, states=None,
+                   current_bank=None):
     """The ``manifest`` part for a push decided by :func:`decide`.
 
     channel: the server's channel dict, or None to create one named ``label``.
-    States are left out, so each snapshot carries its parent's bank; Ludo's
-    states keep their legacy path for now, as Argosy's do.
+    ``states`` (LocalStates) lists that core's slots, merged over
+    ``current_bank`` so no slot is dropped; other cores, and every core when
+    ``states`` is None, carry over from the parent. A hardcore snapshot
+    holds no states, so none are sent for one.
     """
     m = {'rom_file_id': int(rom_file_id), 'is_hardcore': bool(is_hardcore)}
     if channel and channel.get('id'):
@@ -423,6 +556,8 @@ def build_manifest(rom_file_id, channel, action, save=None, emulator=None,
         m['core'] = core
     if approve_hardcore_downgrade:
         m['approve_hardcore_downgrade'] = True
+    if states is not None and states.parts and not is_hardcore:
+        m['states'] = {states.core: merged_bank(current_bank, states)}
     return m
 
 
@@ -469,12 +604,16 @@ class ChannelSync:
         self.api = api
         self.store = store
         self._uploading = contextlib.nullcontext
+        self._local_states = None
 
     def sync(self, rom_file_id, local, load_unit, emulator=None, core=None,
-             choose=None, uploading=None):
+             choose=None, uploading=None, states=None):
         """local: SaveHashes of the save on disk, or None. load_unit: a
-        callable returning the SaveUnit to push, called only when pushing."""
+        callable returning the SaveUnit to push, called only when pushing.
+        states: the LocalStates to bank with the save, or None to leave the
+        snapshot's states as they are."""
         self._uploading = uploading or contextlib.nullcontext
+        self._local_states = states
         channels = self.api.list_channels([rom_file_id])
         if channels is None:
             return ChannelOutcome('offline')
@@ -484,14 +623,26 @@ class ChannelSync:
         if state and channel and state.channel_id == channel.get('id'):
             held = state.held_point()
         current_snap = (channel or {}).get('current')
-        action = decide(held, snapshot_point(current_snap), local)
+        moved = held is not None and states_dirty(state.held_states, states)
+        if moved and state.held_states is None:
+            # Held before states were banked, so nothing says which local
+            # state is new. Bank them only while the channel hasn't moved;
+            # once it has, take the download rather than invent a conflict.
+            moved = held.id == (current_snap or {}).get('id')
+        action = decide(held, snapshot_point(current_snap), local, states_dirty=moved)
         logging.info(f"[CHANNELS] file={rom_file_id} channel="
                      f"{(channel or {}).get('label')}/{(channel or {}).get('id')} "
                      f"held={held.id if held else None} "
-                     f"current={(current_snap or {}).get('id')} -> {action.kind}")
+                     f"current={(current_snap or {}).get('id')} "
+                     f"states={len(states.parts) if states else 0}"
+                     f"{' (changed)' if moved else ''} -> {action.kind}")
 
         if action.kind == 'nothing':
-            return ChannelOutcome('up_to_date', channel=channel)
+            # The held snapshot rides along only when it is the current one,
+            # whose states the channel lists: the caller refills from it.
+            in_step = held is not None and held.id == (current_snap or {}).get('id')
+            return ChannelOutcome('up_to_date', channel=channel,
+                                  snapshot=current_snap if in_step else None)
         if action.kind == 'adopt':
             snap = self.api.get_snapshot(action.snapshot_id, hold=True) or current_snap
             self.store.hold(rom_file_id, channel['id'], channel.get('label'), snap)
@@ -527,14 +678,22 @@ class ChannelSync:
         if unit is None:
             return ChannelOutcome('failed', channel=channel, reason='save unreadable')
         held_save = ((current_snap or {}).get('save') or {})
+        states = self._local_states
+        current_bank = bank_of(current_snap)
         manifest = build_manifest(rom_file_id, channel, action, save=unit,
-                                  emulator=emulator, core=core)
+                                  emulator=emulator, core=core, states=states,
+                                  current_bank=current_bank)
         with self._uploading():
             res = self.api.push(manifest, save=unit,
-                                server_has_save=held_save.get('content_hash') == unit.content_hash)
+                                server_has_save=held_save.get('content_hash') == unit.content_hash,
+                                states=states,
+                                server_state_hashes={h for slots in current_bank.values()
+                                                     for h in slots.values()})
         if res.kind in ('written', 'unchanged'):
             snap = res.snapshot or {}
-            chan = snap.get('channel') or channel or {}
+            # A snapshot names its channel by id; the first push creates it.
+            chan = snap.get('channel') or channel or (
+                {'id': snap['channel_id']} if snap.get('channel_id') else {})
             self.store.hold(rom_file_id, chan.get('id'), chan.get('label'), snap)
             return ChannelOutcome('pushed' if res.kind == 'written' else 'up_to_date',
                                   snapshot=snap, channel=chan)
