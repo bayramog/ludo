@@ -63,7 +63,7 @@ def fixture_environment(profile: Path, *, root=ROOT):
                TMPDIR=str(profile / 'tmp'), TMP=str(profile / 'tmp'), TEMP=str(profile / 'tmp'),
                XDG_CONFIG_HOME=str(profile / 'home' / '.config'),
                XDG_CACHE_HOME=str(profile / 'home' / '.cache'),
-               PYTHONPATH=os.pathsep.join(str(root / p) for p in ('engine', 'app')),
+               PYTHONPATH=os.pathsep.join(str(root / p) for p in ('engine', 'app', 'scripts')),
                PYTHONUTF8='1', PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1',
                PYTHONDONTWRITEBYTECODE='1', PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
     return env
@@ -111,10 +111,12 @@ def configure_output():
             stream.reconfigure(encoding='utf-8', errors='backslashreplace')
 
 
-def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None):
+def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None,
+              file_report=None, expected_files=()):
     configure_output()
     start = time.monotonic()
     result = {'status': 'failed', 'exit_code': None, 'failure': None}
+    file_failure = None
     with tempfile.TemporaryFile() as stream:
         try:
             child = subprocess.run(command, cwd=cwd, env=fixture_environment(profile),
@@ -161,6 +163,25 @@ def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None):
         meaningful = evidence['tests'] > 0
         skipped = evidence['skipped']
         explicit_failure = evidence['failures'] + evidence['errors'] > 0
+        if expected_files:
+            result['file_evidence'] = {}
+            try:
+                raw = json.loads(Path(file_report).read_text(encoding='utf-8'))
+                by_path = {os.path.normcase(str(Path(p).resolve())): counts
+                           for p, counts in raw.items()}
+                for file in expected_files:
+                    name = file.relative_to(cwd / 'tests').as_posix()
+                    counts = by_path.get(os.path.normcase(str(file.resolve())),
+                                         {'collected': 0, 'executed': 0})
+                    if set(counts) != {'collected', 'executed'} or any(
+                            type(v) is not int or v < 0 for v in counts.values()):
+                        raise ValueError('Invalid per-file evidence')
+                    result['file_evidence'][name] = counts
+                if any(c['collected'] == 0 or c['executed'] == 0
+                       for c in result['file_evidence'].values()):
+                    file_failure = 'zero_test_files'
+            except (OSError, ValueError, TypeError, AttributeError):
+                file_failure = 'missing_file_report'
     result['evidence'] = evidence
     if not result['failure']:
         if result['exit_code'] != 0 or explicit_failure:
@@ -169,6 +190,8 @@ def run_child(command, cwd, profile, *, kind='engine', timeout=300, junit=None):
             result['failure'] = 'zero_tests'
         elif skipped:
             result['failure'] = 'unexpected_skip'
+        elif file_failure:
+            result['failure'] = file_failure
         else:
             result['status'] = 'passed'
     # Artifacts intentionally exclude stdout/stderr, exception messages, test
@@ -229,17 +252,23 @@ def run_suite(suite, patterns=(), native=False, report_dir=None, timeout=300):
             with tempfile.TemporaryDirectory(prefix='ludo-tests-') as temporary:
                 profile = Path(temporary)
                 junit = profile / 'junit.xml'
+                file_report = profile / 'files.json'
                 if suite == 'engine':
                     command = [sys.executable, str(group[0])]
                 else:
                     command = [sys.executable, '-m', 'pytest', '-p', 'pytest_asyncio.plugin',
-                               '-q', f'--junitxml={junit}', *map(str, group)]
+                               '-p', 'pytest_file_evidence', '-q', f'--junitxml={junit}',
+                               f'--ludo-file-evidence={file_report}', *map(str, group)]
                 result = run_child(command, ROOT / suite, profile, kind=suite,
-                                   timeout=timeout, junit=junit)
+                                   timeout=timeout, junit=junit, file_report=file_report,
+                                   expected_files=group if suite == 'app' else ())
                 result['files'] = [file.relative_to(ROOT / suite / 'tests').as_posix() for file in group]
                 report['results'].append(result)
                 print(f'{result["status"].upper()} {", ".join(result["files"])} '
                       f'{result["evidence"]} ({result["seconds"]}s)', flush=True)
+                for name, counts in result.get('file_evidence', {}).items():
+                    print(f'  {name}: {counts["collected"]} collected, '
+                          f'{counts["executed"]} executed', flush=True)
         failures = sum(r['status'] != 'passed' for r in report['results'])
         print(f'{suite}: {len(files)} files, {failures} failed groups, '
               f'{len(report["excluded"])} documented exclusions', flush=True)

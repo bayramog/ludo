@@ -176,6 +176,71 @@ unittest.main()
                     junit.write_text(xml)
                 self.assertEqual(self.child('pass', kind='app', junit=junit)['failure'], expected)
 
+    def backend_checkout(self, sources):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        for name in ('test_backend.py', 'test_support.py', 'pytest_file_evidence.py'):
+            source = ROOT / 'scripts' / name
+            if source.exists():
+                shutil.copyfile(source, scripts / name)
+        tests = self.root / 'app/tests'
+        tests.mkdir(parents=True)
+        for name, source in sources.items():
+            path = tests / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source)
+        (scripts / 'test-platforms.json').write_text(json.dumps({
+            'app': {'portable': list(sources), 'windows_exclusions': {}}}))
+        destination = self.root / 'evidence'
+        child = subprocess.run([sys.executable, str(scripts / 'test_backend.py'),
+                                '--report-dir', str(destination)],
+                               capture_output=True, text=True)
+        return child, json.loads((destination / 'summary.json').read_text())
+
+    def test_backend_empty_file_cannot_borrow_another_files_tests(self):
+        child, report = self.backend_checkout({
+            'test_empty.py': '# no tests here\n',
+            'test_empty_extra.py': 'def test_kept(): assert True\n'})
+        self.assertEqual(child.returncode, 1, child.stdout + child.stderr)
+        self.assertEqual(report['results'][0]['failure'], 'zero_test_files')
+        self.assertEqual(report['results'][0]['file_evidence']['test_empty.py'],
+                         {'collected': 0, 'executed': 0})
+
+    def test_backend_file_evidence_uses_paths_for_parametric_class_and_unittest(self):
+        child, report = self.backend_checkout({
+            'test_params.py': "import pytest\n@pytest.mark.parametrize('value', [1, 2])\n"
+                              'def test_value(value): assert value > 0\n',
+            'nested/test_class.py': 'class TestGroup:\n    def test_value(self): assert True\n',
+            'test_unit.py': 'import unittest\nclass Tests(unittest.TestCase):\n'
+                            '    def test_value(self): self.assertTrue(True)\n'})
+        self.assertEqual(child.returncode, 0, child.stdout + child.stderr)
+        self.assertEqual(report['results'][0]['file_evidence'], {
+            'test_params.py': {'collected': 2, 'executed': 2},
+            'nested/test_class.py': {'collected': 1, 'executed': 1},
+            'test_unit.py': {'collected': 1, 'executed': 1}})
+
+    def test_backend_setup_error_takes_precedence_over_unexecuted_file(self):
+        child, report = self.backend_checkout({
+            'test_setup.py': 'def setup_module(): raise RuntimeError("fixture")\n'
+                             'def test_unreached(): pass\n',
+            'test_kept.py': 'def test_kept(): pass\n'})
+        result = report['results'][0]
+        self.assertEqual(child.returncode, 1)
+        self.assertEqual(result['evidence']['errors'], 1)
+        self.assertEqual(result['failure'], 'test_failure')
+        self.assertEqual(result['file_evidence']['test_setup.py']['executed'], 0)
+
+    def test_backend_skip_takes_precedence_over_unexecuted_file(self):
+        child, report = self.backend_checkout({
+            'test_skip.py': "import pytest\n@pytest.mark.skip(reason='fixture')\n"
+                            'def test_unreached(): pass\n',
+            'test_kept.py': 'def test_kept(): pass\n'})
+        result = report['results'][0]
+        self.assertEqual(child.returncode, 1)
+        self.assertEqual(result['evidence']['skipped'], 1)
+        self.assertEqual(result['failure'], 'unexpected_skip')
+        self.assertEqual(result['file_evidence']['test_skip.py']['executed'], 0)
+
     def test_backend_failure_artifact_keeps_identity_but_omits_parameters_and_messages(self):
         junit = self.root / 'failure.xml'
         junit.write_text('<testsuite tests="1" failures="1"><testcase classname="tests.test_fixture" '
