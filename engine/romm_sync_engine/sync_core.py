@@ -2728,6 +2728,24 @@ def _extract_7z_cli(exe, archive_path, dest_dir, emit):
 # measuring contention from an unrelated stuck query, not offset cost.
 LIBRARY_PAGE_SIZE = 100
 
+# RomM 5.5 serves big pages without the cliff above: measured 2026-11-23 on a
+# 20,168-ROM library, a full walk took 46s at 100 and 23s at 500 (worst page
+# 0.9s), and a 15MB page answered in 2s. 500 rather than 1000: 1000 gained
+# only 3s more while doubling what one slow page costs. Older servers keep
+# LIBRARY_PAGE_SIZE, so the cliff they still have stays out of reach.
+LIBRARY_PAGE_SIZE_5_5 = 500
+
+
+def server_version_at_least(version, wanted):
+    """True when a RomM version string ("5.5.0-beta.1") is at least the
+    (major, minor, patch) wanted. A pre-release counts as its release: the
+    betas carry the features. Unknown or unparsable is False."""
+    nums = re.findall(r'\d+', (version or '').split('-', 1)[0])
+    if not nums:
+        return False
+    got = tuple(int(n) for n in nums[:3]) + (0,) * (3 - len(nums[:3]))
+    return got >= tuple(wanted)
+
 # Hard ceiling on any single /api/roms request, wherever it comes from.
 #
 # Three call sites independently picked oversized limits — 1000 for the full
@@ -3203,8 +3221,34 @@ class _OperationSession(requests.Session):
                 else:
                     self.headers['Authorization'] = authorization
                 self.cookies = copy.deepcopy(owner._session.cookies)
+        if str(method).upper() == 'GET' and urlparse(str(url)).path.rstrip('/').endswith('/api/roms'):
+            kwargs['params'] = _without_provider_metadata(kwargs.get('params'))
         # A successful refresh must persist its rotated tokens before cancel.
         return super().request(method, url, *args, **kwargs)
+
+
+def _without_provider_metadata(params):
+    """The /api/roms params with with_provider_metadata=false added.
+
+    RomM 5.5 then leaves out the per-provider metadata blobs (igdb_metadata,
+    ss_metadata, merged_ra_metadata and the rest), half of every library page.
+    No list reader uses them: the game detail and the achievement lookup fetch
+    /api/roms/{id}, which keeps them. Older servers ignore the parameter. A
+    caller that sets it itself wins.
+    """
+    if params is None:
+        return {'with_provider_metadata': 'false'}
+    if isinstance(params, dict):
+        if 'with_provider_metadata' in params:
+            return params
+        return {**params, 'with_provider_metadata': 'false'}
+    try:
+        pairs = list(params)
+    except TypeError:
+        return params
+    if any(isinstance(p, tuple) and p and p[0] == 'with_provider_metadata' for p in pairs):
+        return pairs
+    return pairs + [('with_provider_metadata', 'false')]
 
 
 def _auth_locked(method):
@@ -3873,6 +3917,38 @@ class RomMClient:
         except Exception as e:
             print(f"Error getting device: {e}")
             return None
+
+    def get_rom_identifiers(self):
+        """Every ROM id the server holds for this user, as a set; None when it
+        can't say (offline, an error, a server without the route).
+
+        One small response: 20,168 ids in 0.17s and 120KB on RomM 5.5. It is
+        what turns "a platform shrank" into "these games were deleted" without
+        walking the platform; see Plugin._removals_by_identifiers.
+        """
+        if not self.ensure_authenticated():
+            return None
+        try:
+            r = self.session.get(urljoin(self.base_url, '/api/roms/identifiers'), timeout=60)
+            if r.status_code != 200:
+                logging.info(f"rom identifiers unavailable: HTTP {r.status_code}")
+                return None
+            ids = r.json()
+            if not isinstance(ids, list):
+                return None
+            return {int(i) for i in ids}
+        except Exception as e:
+            logging.info(f"rom identifiers unavailable: {e}")
+            return None
+
+    @property
+    def library_page_size(self):
+        """Rows per page of a library walk for this server; see
+        LIBRARY_PAGE_SIZE_5_5. The old size until the heartbeat is read."""
+        version = (getattr(self, 'server_features', None) or {}).get('version')
+        if server_version_at_least(version, (5, 5, 0)):
+            return LIBRARY_PAGE_SIZE_5_5
+        return LIBRARY_PAGE_SIZE
 
     def get_server_features(self):
         """Read /api/heartbeat once and keep what Ludo cares about.
@@ -4706,7 +4782,7 @@ class RomMClient:
                 # Bigger pages keep helping in theory, but ~11.5s is the floor
                 # for any shape on a 3k library, and one giant request loses
                 # both progress reporting and per-page retry.
-                chunk_size = LIBRARY_PAGE_SIZE
+                chunk_size = self.library_page_size
                 total_chunks = (total_games + chunk_size - 1) // chunk_size
 
                 scope = "changed games" if updated_after else "games"
@@ -4830,7 +4906,7 @@ class RomMClient:
                     name = (platform.get('display_name') or platform.get('name')
                             or platform.get('slug') or 'Unknown')
                     slug = platform.get('slug') or platform.get('fs_slug')
-                    pages_needed = (count + LIBRARY_PAGE_SIZE - 1) // LIBRARY_PAGE_SIZE
+                    pages_needed = (count + self.library_page_size - 1) // self.library_page_size
 
                     # This platform's slice of the checkpoint, re-keyed to the
                     # plain offsets _fetch_pages_parallel expects. Keeping the
@@ -4849,7 +4925,7 @@ class RomMClient:
                         progress_callback('page', f'⟳ {name} ({index + 1}/{platform_total})')
 
                     games = self._fetch_pages_parallel(
-                        count, LIBRARY_PAGE_SIZE, pages_needed, progress_callback,
+                        count, self.library_page_size, pages_needed, progress_callback,
                         trim_fields, platform_resume, platform_sink,
                         platform_id=pid, loaded_base=loaded_base,
                         progress_extra={
@@ -4944,9 +5020,10 @@ class RomMClient:
                 self.last_fetch_incomplete = False
                 return [], 0
 
-            pages_needed = (rom_count + LIBRARY_PAGE_SIZE - 1) // LIBRARY_PAGE_SIZE
+            page_size = self.library_page_size
+            pages_needed = (rom_count + page_size - 1) // page_size
             games = self._fetch_pages_parallel(
-                rom_count, LIBRARY_PAGE_SIZE, pages_needed, progress_callback,
+                rom_count, page_size, pages_needed, progress_callback,
                 trim_fields, platform_id=platform_id,
                 progress_extra={'total': rom_count})
 

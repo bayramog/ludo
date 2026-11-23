@@ -1665,7 +1665,7 @@ class LudoBackend:
         not be written.
         """
         try:
-            page_size = LIBRARY_PAGE_SIZE
+            page_size = getattr(self._romm_client, 'library_page_size', LIBRARY_PAGE_SIZE)
             pages = -(-total // page_size) if total else None
             record = {
                 'seconds': round(seconds, 2),
@@ -2300,7 +2300,7 @@ class LudoBackend:
                     # Replay whatever an interrupted attempt already fetched. The
                     # page size has to match what _fetch_all_games_chunked will
                     # use, or the checkpoint is correctly rejected as mismatched.
-                    resumed = (self._resume_begin(known_total, LIBRARY_PAGE_SIZE)
+                    resumed = (self._resume_begin(known_total, self._romm_client.library_page_size)
                                if known_total else {})
                     roms_result = self._romm_client.get_roms(
                         progress_callback=_on_fetch_progress,
@@ -7662,6 +7662,80 @@ class LudoBackend:
                     out[pid] = mark
         return out
 
+    @staticmethod
+    def _removals_by_identifiers(games, platform_id, dropped, server_ids):
+        """The rom_ids to remove for a platform that shrank by ``dropped``, or
+        None when a walk has to settle it.
+
+        The local ids of the platform (each entry's rom_id and its siblings')
+        that the server no longer lists are what was deleted. They account for
+        the drop only when their number equals it: fewer means something was
+        also added or never held here, more means the count and the id list
+        disagree. Either way, walk. A deleted id inside a sibling group walks
+        too: removing it changes which ROM leads the group, which only the
+        walk's grouping decides.
+        """
+        if dropped <= 0 or server_ids is None:
+            return None
+        local, standalone = set(), {}
+        for g in games:
+            romm = g.get('romm_data') or {}
+            # An orphan already left the server; it is not part of this drop.
+            if (romm.get('platform_id') != platform_id or not g.get('rom_id')
+                    or g.get('is_orphan')):
+                continue
+            sibs = {s.get('id') for s in (romm.get('sibling_roms') or [])
+                    if isinstance(s, dict) and s.get('id') is not None}
+            local.add(g['rom_id'])
+            local |= sibs
+            if not sibs:
+                standalone[g['rom_id']] = g
+        missing = local - server_ids
+        if len(missing) != dropped or not missing <= set(standalone):
+            return None
+        return missing
+
+    def _drop_deletions_by_identifiers(self, changed, baselines, fresh_marks,
+                                       force_platforms, stats):
+        """Settle pure deletions without a walk; return the platforms left to walk.
+
+        A platform that shrank and isn't forced (nothing new came back from
+        updated_after) most likely only lost games. /api/roms/identifiers names
+        them in one small call, so a 17k-ROM platform losing one game costs
+        0.2s instead of re-reading all 17k. Anything the ids don't fully
+        explain is left in ``changed`` and walked as before.
+        """
+        shrunk = [(pid, p, c) for pid, p, c in changed
+                  if baselines.get(pid) is not None and c < baselines[pid]
+                  and not (force_platforms and pid in force_platforms)]
+        if not shrunk:
+            return changed
+        server_ids = self._romm_client.get_rom_identifiers()
+        if server_ids is None:
+            return changed
+        settled, gone = set(), set()
+        for pid, platform, count in shrunk:
+            removed = self._removals_by_identifiers(
+                self._available_games, pid, baselines[pid] - count, server_ids)
+            if removed is None:
+                continue
+            gone |= removed
+            settled.add(pid)
+            self._library_platform_totals[pid] = count
+            if pid in fresh_marks:
+                self._library_platform_marks[pid] = fresh_marks[pid]
+            logging.info(f"Reconcile: {platform.get('slug') or pid} lost "
+                         f"{len(removed)} game(s), removed without a walk")
+        if gone:
+            before = self._available_games
+            games = [g for g in before if g.get('rom_id') not in gone]
+            # The same orphan veto as every other delete path.
+            kept = self._preserve_orphaned_downloads(games, before)
+            stats['removed'] += len(gone) - kept
+            self._available_games = games
+            stats.setdefault('settled_by_ids', []).extend(sorted(settled))
+        return [c for c in changed if c[0] not in settled]
+
     def _reconcile_platforms(self, only_platform=None, force_platforms=None) -> dict:
         """Bring the library back in step with the server, one platform at a time.
 
@@ -7765,6 +7839,9 @@ class LudoBackend:
         marks.update(adopt)
 
         stats['checked'] = len(platforms) if only_platform is None else len(changed)
+        if changed and only_platform is None:
+            changed = self._drop_deletions_by_identifiers(
+                changed, baselines, fresh_marks, force_platforms, stats)
         if not changed:
             return stats
 
@@ -7853,7 +7930,7 @@ class LudoBackend:
 
         after_ids = {g['rom_id'] for g in games if g.get('rom_id')}
         stats['added'] = len(after_ids - before_ids)
-        stats['removed'] = len(before_ids - after_ids)
+        stats['removed'] += len(before_ids - after_ids)
         # Rows the walk returned for ids we already had. Not "changed" — we do
         # not diff field by field — but "re-read", which is what a wholesale
         # slice replacement can honestly claim.
