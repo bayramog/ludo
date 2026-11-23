@@ -880,7 +880,13 @@ class GameDataCache:
             # Arcade platforms
             'arcade': 'Arcade',
             'mame': 'MAME',
+            'mame-advmame': 'AdvanceMAME',
             'fbneo': 'FBNeo',
+            'fba': 'FinalBurn Alpha',
+            'naomi': 'Sega Naomi',
+            'naomi2': 'Sega Naomi 2',
+            'atomiswave': 'Atomiswave',
+            'stv': 'Sega ST-V',
             'neogeo': 'Neo Geo',
             'neogeoaes': 'Neo Geo AES',
             'neogeomvs': 'Neo Geo MVS',
@@ -2567,9 +2573,12 @@ def _extract_archive(archive_path, dest_dir, on_progress=None):
 
 # Arcade cores identify a game by its zip's short name and read the romset from
 # inside the archive, so unpacking one makes it "romset unknown".
-ARCADE_SLUGS = ('arcade', 'mame', 'hbmame', 'fbneo', 'fba', 'fbalpha',
+# RomM 5.5 split `arcade` by emulator family (mame, mame-advmame, fbneo, fba)
+# and gave romset boards their own slugs; cps1-3 are older servers' slugs.
+ARCADE_SLUGS = ('arcade', 'mame', 'mame-advmame', 'hbmame', 'fbneo', 'fba', 'fbalpha',
                 'neogeo', 'neogeoaes', 'neogeomvs', 'neo-geo-aes', 'neo-geo-mvs',
-                'cps1', 'cps2', 'cps3')
+                'cps1', 'cps2', 'cps3',
+                'naomi', 'naomi2', 'naomigd', 'atomiswave', 'stv')
 
 
 def arcade_romset_stays_zipped(platform_slug, member_names):
@@ -7494,6 +7503,11 @@ class RetroArchInterface:
             # BIOS files are put. MAME only looks beside the ROM, so every Neo
             # Geo game exits with "Required files are missing" under it.
             'Arcade': ['fbneo', 'mame', 'fbalpha'],
+            # RomM 5.5's per-family arcade platforms
+            'MAME': ['mame', 'fbneo'],
+            'AdvanceMAME': ['mame2003_plus', 'mame2003', 'mame'],
+            'FinalBurn Neo': ['fbneo'],
+            'FinalBurn Alpha': ['fbalpha', 'fbneo'],
             'PlayStation 2': ['pcsx2', 'pcee2', 'play'],
             'Nintendo GameCube': ['dolphin'],
             'Sega Dreamcast': ['flycast', 'redream'],
@@ -9290,6 +9304,11 @@ class RetroArchInterface:
             '32x': ['picodrive'],
             'super famicom': ['snes9x', 'bsnes', 'mesen-s'],
             'arcade': ['fbneo', 'mame', 'fbalpha'],
+            'mame': ['mame', 'fbneo'],
+            'finalburn': ['fbneo', 'fbalpha'],
+            'naomi': ['flycast'],
+            'atomiswave': ['flycast'],
+            'st-v': ['kronos'],
             'neo geo': ['fbneo', 'mame', 'fbalpha'],
             'neo geo cd': ['neocd', 'fbneo'],
             'neo geo pocket': ['beetle_ngp', 'mednafen_ngp'],
@@ -10900,6 +10919,9 @@ class RetroArchInterface:
             'arcade': 'fbneo',
             'mame': 'mame',
             'fbneo': 'fbneo',
+            'fba': 'fbalpha',
+            'naomi': 'flycast',
+            'atomiswave': 'flycast',
             'atari2600': 'stella',
         }
         return platform_to_core_map.get(platform_slug.lower(), platform_slug)
