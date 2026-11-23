@@ -19336,8 +19336,11 @@ class AutoSyncManager:
                         original_filename, romm_emulator, _platform_of(game), target_core)
                     raw_path = final_path
                     if convert:
-                        # The core reads <stem>.srm whatever the server named it.
-                        final_path = final_path.with_suffix('.srm')
+                        # The core reads <content stem>.srm whatever the server
+                        # named it (DuckStation adds _1, Argosy zips N64 units).
+                        final_path = final_path.with_name(
+                            save_convert.core_save_name(original_filename,
+                                                        game.get('local_path')))
                         retroarch_filename = final_path.name
 
                     # Only skip download if the local file actually exists AND

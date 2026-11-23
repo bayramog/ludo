@@ -31,6 +31,24 @@ def decisions():
     check('no core', n('Mario.zip', '', 'n64', None), False)
 
 
+def names():
+    c = C.core_save_name
+    check('content stem wins', c('X_1.mcd', '/r/Chicken Run.chd'), 'Chicken Run.srm')
+    check('mcd slot dropped', c('Chicken Run_1.mcd'), 'Chicken Run.srm')
+    check('zip renamed', c('Mario.zip'), 'Mario.srm')
+
+
+def ps1_raw_card_placed():
+    with tempfile.TemporaryDirectory() as d:
+        saves = Path(d)
+        dl = saves / 'Game_1.mcd'
+        dl.write_bytes(b'MC' + bytes(128 * 1024 - 2))
+        ok = C.convert_into_core(dl, saves / 'Game.srm', 'psx', 'pcsx_rearmed',
+                                 None, log=lambda *_: None)
+        check('ps1 card placed', ok, True)
+        check('ps1 card files', [p.name for p in saves.iterdir()], ['Game.srm'])
+
+
 def _n64_unit(d):
     src = d / 'src'
     src.mkdir()
@@ -73,9 +91,11 @@ def refusal_leaves_raw():
 
 if __name__ == '__main__':
     decisions()
+    names()
     if S.available():
         n64_zip_becomes_srm()
         refusal_leaves_raw()
+        ps1_raw_card_placed()
     else:
         print('skip conversion: sigil without collect/restore')
     if failures:

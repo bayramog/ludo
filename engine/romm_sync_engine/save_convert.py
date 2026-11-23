@@ -6,6 +6,7 @@ is a ``.mcd``. When a download isn't already the core's ``.srm``, sigil
 restores it under the core's layout. Anything sigil refuses, or any platform
 it doesn't sync, keeps the raw placement the caller already does.
 """
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -31,6 +32,21 @@ def needs_conversion(file_name, emulator_tag, platform, core):
     if tag and tag != core and (tag in _FOREIGN or tag.endswith('_standalone')):
         return True
     return Path(file_name or '').suffix.lower() != '.srm'
+
+
+_PS1_CARD = 128 * 1024
+
+
+def core_save_name(file_name, content_path=None):
+    """The file a RetroArch core reads for this game: <content stem>.srm,
+    or, without local content, the server's name less DuckStation's slot
+    suffix."""
+    if content_path:
+        return Path(content_path).stem + '.srm'
+    stem = Path(file_name or 'save').stem
+    if Path(file_name or '').suffix.lower() == '.mcd' and re.search(r'_\d$', stem):
+        stem = stem[:-2]
+    return stem + '.srm'
 
 
 def _core_id(core):
@@ -79,6 +95,12 @@ def convert_into_core(unit_path, final_path, platform, core, content_path, log=p
             sigil_saves.restore(unit_path.read_bytes(), game, layout, content, Path(d),
                                 game_ids=game_ids, overwrite_local=True)
         except sigil_saves.SigilError as e:
+            if platform in ('psx', 'ps1', 'ps') and unit_path.stat().st_size == _PS1_CARD:
+                # A raw card is already what every PS1 core keeps in its .srm;
+                # sigil only declines to pick this game's saves out of it.
+                shutil.move(str(unit_path), str(final_path))
+                log(f"  🔄 Placed PS1 card {unit_path.name} as {final_path.name}")
+                return True
             log(f"  ℹ️ sigil left {unit_path.name} as-is ({e})")
             return False
         except Exception as e:
