@@ -230,6 +230,36 @@ function regionToEmoji(region: string): string {
   return REGION_EMOJI[(region || '').toLowerCase()] || region;
 }
 
+// Short region codes ("U", "E", "eur") spelled out from the full names that
+// share their flag in REGION_EMOJI: "u" -> "USA".
+function regionName(code: string): string | null {
+  const k = code.trim().toLowerCase();
+  const flag = REGION_EMOJI[k];
+  if (!flag) return null;
+  // A code's name is the longest key with its flag and first letter: "usa"
+  // for "u", "world" for "w" (not "unlicensed", which shares the globe).
+  const name = k.length > 2 ? k : Object.keys(REGION_EMOJI)
+    .filter((n) => REGION_EMOJI[n] === flag && n[0] === k[0])
+    .reduce((a, b) => (b.length > a.length ? b : a), k);
+  return name === 'usa' || name.length <= 3 ? name.toUpperCase()
+    : name.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// The parenthesised tags of a ROM file name, region first and spelled out:
+// "Toy Story 2 (Europe) (En,Fr,De)" -> "Europe · En,Fr,De", GoodTools'
+// "(U) (V1.1) [S] [!]" -> "USA · V1.1". Square-bracket dump flags are left
+// out: they mark the dump, not the version. Empty when the name has no tags.
+export function versionTags(file?: string): string {
+  const groups = [...(file || '').matchAll(/\(([^)]+)\)/g)].map((m) => m[1].trim()).filter(Boolean);
+  const asRegion = (g: string) => {
+    const names = g.split(',').map(regionName);
+    return names.every(Boolean) ? names.join(', ') : null;
+  };
+  const region = groups.findIndex((g) => asRegion(g) !== null);
+  if (region < 0) return groups.join(' · ');
+  return [asRegion(groups[region]), ...groups.filter((_, i) => i !== region)].join(' · ');
+}
+
 function openRegionPicker(
   romId: number, gameName: string,
   siblings: { rom_id: number; name: string; fs_name_no_ext?: string; fs_extension?: string }[],
@@ -262,10 +292,22 @@ function openRegionPicker(
   const bases = all.map(base);
   const baseClash = (e: typeof all[number]) => !!e.ext && bases.indexOf(base(e)) !== bases.lastIndexOf(base(e));
 
+  // What tells versions apart is the tags in their file names: "(Italy)",
+  // "(Europe) (En,Fr,De)", "(Rev 1)". The title is the fallback, for files
+  // without tags or two versions whose tags are the same.
+  const tagsOf = (e: typeof all[number]) => versionTags(e.file);
+  const tags = all.map(tagsOf);
+  const tagClash = (t: string) => !t || tags.indexOf(t) !== tags.lastIndexOf(t);
+  const nameOf = (e: typeof all[number]) => {
+    const t = tagsOf(e);
+    const plain = base(e) + (baseClash(e) ? ` (.${e.ext})` : '');
+    return tagClash(t) ? plain : t;
+  };
+
   showModal(
     <PickerModal title="Select region" items={all.map((entry) => ({
       key: entry.rom_id,
-      label: base(entry) + (baseClash(entry) ? ` (.${entry.ext})` : '')
+      label: nameOf(entry)
         + (noFile(entry.rom_id) ? ' (no file)'
           : !(entry.rom_id === romId ? mainDownloaded : downloadedIds.has(entry.rom_id)) ? ' (not downloaded)' : ''),
       active: entry.rom_id === lastUsedId && !noFile(entry.rom_id),
@@ -704,7 +746,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
       onSecondaryActionDescription="Details"
       onOptionsButton={dl ? requestDelete : undefined}
       onOptionsActionDescription={dl ? (confirmDelete ? 'Confirm delete' : 'Delete') : undefined}
-      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : 'Download'}
+      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : isMultiRegion ? 'Download (hold: regions)' : 'Download'}
       onFocus={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); scheduleDetailPrefetch(game.rom_id); if (index !== undefined) onFocusIdx?.(index); _tileFocusScrub(selfRef.current, game.name); }}
       onBlur={() => { setFocused(false); cancelDetailPrefetch(); }}
       onMouseEnter={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); }}
