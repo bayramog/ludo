@@ -15,7 +15,8 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const next = (events, name) => once(events, name, { signal: AbortSignal.timeout(75000) });
 
 function fixtureEnvironment(root) {
-  const env = { USERNAME: "ludo-test", USER: "ludo-test" };
+  const env = {};
+  if (process.platform === "win32" && process.env.USERNAME) env.USERNAME = process.env.USERNAME;
   for (const key of ["PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "SystemDrive",
                      "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LANG", "LC_ALL"]) {
     if (process.env[key]) env[key] = process.env[key];
