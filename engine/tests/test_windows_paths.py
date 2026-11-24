@@ -4,6 +4,7 @@
 The same file runs on real Windows and Linux in CI. Simulated platform cases
 only test path selection; they are not evidence of Windows runtime execution.
 """
+import io
 import os
 from pathlib import Path
 import stat
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -21,7 +23,7 @@ _sandbox = tempfile.TemporaryDirectory(prefix='ludo-path-tests-')
 os.environ.update(HOME=_sandbox.name, USERPROFILE=_sandbox.name,
                   LOCALAPPDATA=str(Path(_sandbox.name) / 'AppData' / 'Local'),
                   APPDATA=str(Path(_sandbox.name) / 'AppData' / 'Roaming'))
-from romm_sync_engine import paths, profiles, sync_core
+from romm_sync_engine import paths, profiles, settings_file, sync_core
 from romm_sync_engine.sync_core import SettingsManager
 
 
@@ -42,7 +44,7 @@ class PathSettingsTests(unittest.TestCase):
         SettingsManager._mtimes.clear()
 
     def test_imports_this_checkout(self):
-        for module in (paths, profiles, sync_core):
+        for module in (paths, profiles, settings_file, sync_core):
             self.assertEqual(Path(module.__file__).resolve().parent.parent, ENGINE)
 
     def test_named_windows_profile_shares_only_machine_state(self):
@@ -113,6 +115,46 @@ class PathSettingsTests(unittest.TestCase):
                              str(profiles.save_dirs(profile)['saves']))
         self.assertEqual(source.read_bytes(), before)
         self.assertEqual(profiles.get(profiles.load(), profile)['name'], 'İkinci oyuncu')
+
+    def test_legacy_locale_survives_profile_copy_and_utf8_save(self):
+        settings = SettingsManager()
+        roms = 'C:/Users/Café/ROMs %50'
+        settings.set('Download', 'rom_directory', roms)
+        settings.set('Download', 'save_directory', 'C:/Saves')
+        settings.set('Device', 'device_name', 'test-host')
+        settings.set('RomM', 'client_token', 'test-only-legacy-token')
+        text = io.StringIO()
+        settings.config.write(text)
+        legacy = text.getvalue().encode('cp1252')
+        # Deterministic legacy-locale fixtures for both platforms. Keep
+        # pathlib and the rest of the process on their real platform.
+        for platform_name in ('nt', 'posix'):
+            simulated_os = SimpleNamespace(**{**vars(os), 'name': platform_name})
+            with self.subTest(platform=platform_name), \
+                    patch.object(settings_file, 'os', simulated_os), \
+                    patch.object(settings_file.locale, 'getencoding', return_value='cp1252'):
+                settings.config_file.write_bytes(legacy)
+                profile = profiles.create('New player')
+                self.assertEqual(settings.config_file.read_bytes(), legacy)
+                settings.load_settings()
+                self.assertEqual(settings.get('Download', 'rom_directory'), roms)
+                self.assertEqual(settings.get('RomM', 'client_token'), 'test-only-legacy-token')
+                settings.save_settings()
+                self.assertIn(roms, settings.config_file.read_text(encoding='utf-8'))
+                with patch.multiple(paths, _profile=profile, _profile_locked=False):
+                    copied = SettingsManager()
+                    self.assertEqual(copied.get('Download', 'rom_directory'), roms)
+                    self.assertEqual(copied.get('RomM', 'client_token'), '')
+
+    def test_invalid_utf8_with_utf8_locale_is_not_rewritten(self):
+        settings = SettingsManager()
+        invalid = b'[Download]\nrom_directory = \xff\n'
+        settings.config_file.write_bytes(invalid)
+        with patch.object(settings_file.locale, 'getencoding', return_value='utf-8'):
+            with self.assertRaises(UnicodeDecodeError):
+                settings.load_settings()
+        self.assertEqual(settings.config_file.read_bytes(), invalid)
+        self.assertFalse(list(settings.config_dir.glob('settings-*.tmp')))
 
     def test_profile_paths_reject_windows_escape_and_device_names(self):
         for name in (r'..\escape', r'C:\escape', 'C:drive', 'NUL', 'con.txt',
@@ -200,10 +242,13 @@ assert s.get('Download', 'rom_directory') == sys.argv[2]
         before = settings.config_file.read_bytes()
         with patch.object(os, 'replace', side_effect=PermissionError('destination busy')):
             with self.assertRaises(PermissionError):
-                settings.save_settings()
+                settings.set('System', 'debug_mode', 'true')
         self.assertEqual(settings.config_file.read_bytes(), before)
         self.assertEqual(list(settings.config_dir.glob('settings-*.tmp')), [])
         settings.save_settings()
+        SettingsManager._shared.clear()
+        SettingsManager._mtimes.clear()
+        self.assertEqual(SettingsManager().get('System', 'debug_mode'), 'true')
 
     def test_serialization_failure_closes_file_and_preserves_previous_data(self):
         settings = SettingsManager()
@@ -230,6 +275,20 @@ assert s.get('Download', 'rom_directory') == sys.argv[2]
         with self.assertRaises(OSError):
             os.fstat(fds[0])
         self.assertEqual(list(settings.config_dir.glob('settings-*.tmp')), [])
+
+    def test_fsync_failure_closes_descriptor_and_preserves_previous_settings(self):
+        settings = SettingsManager()
+        before = settings.config_file.read_bytes()
+        fds = []
+        def fail(fd):
+            fds.append(fd)
+            raise OSError('disk flush failed')
+        with patch.object(os, 'fsync', side_effect=fail), self.assertRaises(OSError):
+            settings.set('System', 'debug_mode', 'true')
+        self.assertEqual(settings.config_file.read_bytes(), before)
+        self.assertEqual(list(settings.config_dir.glob('settings-*.tmp')), [])
+        with self.assertRaises(OSError):
+            os.fstat(fds[0])
 
     def test_windows_account_fallback_does_not_import_pwd(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(sys, 'platform', 'win32'), \

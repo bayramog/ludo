@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 from . import paths
+from .settings_file import read_settings, write_settings
 
 DEFAULT = paths.DEFAULT_PROFILE
 # How the running app chose its profile ({'id', 'steam', 'ask'}), set by a
@@ -485,7 +486,7 @@ def create(name='', copy_from=None):
     if source.exists():
         # Match SettingsManager: paths are literal UTF-8 values, including '%'.
         src = configparser.ConfigParser(interpolation=None)
-        src.read(source, encoding='utf-8')
+        read_settings(src, source)
         out = configparser.ConfigParser(interpolation=None)
         for section in _MACHINE_SECTIONS:
             if src.has_section(section):
@@ -500,9 +501,7 @@ def create(name='', copy_from=None):
         if not out.has_section('Download'):
             out.add_section('Download')
         out['Download']['save_directory'] = str(dirs['saves'])
-        with (target / 'settings.ini').open('w', encoding='utf-8') as f:
-            out.write(f)
-        os.chmod(target / 'settings.ini', 0o600)
+        write_settings(out, target / 'settings.ini')
     data['profiles'].append({'id': profile_id, 'name': ' '.join((name or '').split())[:40],
                              'created': int(time.time()),
                              # where Back on its welcome screen returns to

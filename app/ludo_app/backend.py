@@ -33,6 +33,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin
 
 from romm_sync_engine.process_lock import ProcessLock
+from romm_sync_engine.settings_file import read_settings, write_settings
 from romm_sync_engine.owned_tasks import OwnedTasks
 
 from .host import HostProfile
@@ -4089,8 +4090,8 @@ class LudoBackend:
                 logging.error("Settings file not found")
                 return False
 
-            config = configparser.ConfigParser()
-            config.read(ini_path)
+            config = configparser.ConfigParser(interpolation=None)
+            read_settings(config, ini_path)
             if not config.has_section('Collections'):
                 config.add_section('Collections')
 
@@ -4123,8 +4124,7 @@ class LudoBackend:
             config.set('Collections', 'selected_for_sync', '|'.join(sorted(sync_set)))
             config.set('Collections', 'auto_sync_enabled', 'true' if sync_set else 'false')
 
-            with open(ini_path, 'w') as f:
-                config.write(f)
+            write_settings(config, ini_path)
 
             # Update in-memory settings so the heartbeat sees the change immediately
             if self._settings:
@@ -5995,8 +5995,8 @@ class LudoBackend:
             self._stop_sync()
             logging.info("Reset: sync stopped")
 
-            config = configparser.ConfigParser()
-            config.read(ini_path)
+            config = configparser.ConfigParser(interpolation=None)
+            read_settings(config, ini_path)
 
             download_dir = Path(config.get('Download', 'rom_directory',
                                            fallback=_default_roms_dir())).expanduser()
@@ -6121,8 +6121,7 @@ class LudoBackend:
                 config.set('Collections', 'actively_syncing',  '')
                 config.set('Collections', 'selected_for_sync', '')
                 config.set('Collections', 'auto_sync_enabled', 'false')
-                with open(ini_path, 'w') as f:
-                    config.write(f)
+                write_settings(config, ini_path)
 
             self._romm_collections = None
             self._romm_smart_collections = None
@@ -13224,8 +13223,8 @@ class LudoBackend:
                 logging.error("Settings file not found")
                 return {'success': False, 'message': 'Settings file not found'}
 
-            config = configparser.ConfigParser()
-            config.read(ini_path)
+            config = configparser.ConfigParser(interpolation=None)
+            read_settings(config, ini_path)
             if not config.has_section('Steam'):
                 config.add_section('Steam')
 
@@ -13278,8 +13277,7 @@ class LudoBackend:
                         # Clear the Steam sync collections list
                         self._steam_manager.set_steam_sync_collections(set())
 
-            with open(ini_path, 'w') as f:
-                config.write(f)
+            write_settings(config, ini_path)
 
             # Update in-memory settings
             if self._settings:
