@@ -275,8 +275,10 @@ export function PlatformIcon({ slug, fsSlug, size, onTone }: { slug?: string | n
 // `armed` inverts the danger combination — the tinted-background/red-text row
 // becomes a solid red fill with light text, so a half-pressed destructive row
 // reads as live at a glance rather than as another idle menu entry.
-export function UserMenuRow({ icon, label, danger, armed, disabled, onSelect, trailing }:
-  { icon: any; label: any; danger?: boolean; armed?: boolean; disabled?: boolean; onSelect: () => void; trailing?: any }) {
+export function UserMenuRow({ icon, label, danger, armed, disabled, onSelect, trailing, okHint }:
+  { icon: any; label: any; danger?: boolean; armed?: boolean; disabled?: boolean; onSelect: () => void; trailing?: any;
+    // The bottom bar's label for A on this row; "Select" when absent.
+    okHint?: string }) {
   const [hot, setHot] = useState(false);
   const fg = disabled ? V2.fgFaint : (armed ? '#fff' : (danger ? V2.danger : V2.fg));
   const bg = armed
@@ -284,6 +286,7 @@ export function UserMenuRow({ icon, label, danger, armed, disabled, onSelect, tr
     : ((hot && !disabled) ? (danger ? 'rgba(255,80,80,0.12)' : V2.surfaceHover) : 'transparent');
   return (
     <Focusable noFocusRing onActivate={() => !disabled && onSelect()} onClick={() => !disabled && onSelect()}
+      onOKActionDescription={okHint}
       onFocus={() => setHot(true)} onBlur={() => setHot(false)}
       onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
       style={{
@@ -1331,7 +1334,7 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
   // keepOpen: the row acts inside the modal (e.g. retry) instead of closing it.
   // icon replaces the active check; trailing sits after the label.
   items: { key: string | number; label: any; active?: boolean; danger?: boolean; keepOpen?: boolean;
-    icon?: any; trailing?: any; onSelect: () => void }[];
+    icon?: any; trailing?: any; okHint?: string; onSelect: () => void }[];
   onDismiss?: () => void;
   closeModal?: () => void;
 }) {
@@ -1384,7 +1387,7 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
           {items.map((it) => (
             <UserMenuRow key={it.key}
               icon={it.icon !== undefined ? it.icon : it.active ? <FaCheck size={14} style={{ color: V2.brand }} /> : null}
-              label={it.label} danger={it.danger} trailing={it.trailing}
+              label={it.label} danger={it.danger} trailing={it.trailing} okHint={it.okHint}
               onSelect={() => { if (!it.keepOpen) closeModal?.(); it.onSelect(); }} />
           ))}
         </Focusable>

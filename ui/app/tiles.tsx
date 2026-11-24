@@ -362,6 +362,8 @@ export function openRegionPicker(
       trailing: entry.rom_id === lastUsedId && onDisk(entry.rom_id) && !noFile(entry.rom_id)
         ? <span style={{ marginLeft: 'auto', paddingLeft: '12px', fontSize: '11px', fontWeight: 600, color: V2.brand, whiteSpace: 'nowrap' }}>Last played</span>
         : undefined,
+      // A on a row downloads that version or starts it: say which.
+      okHint: noFile(entry.rom_id) ? undefined : onDisk(entry.rom_id) ? 'Play' : 'Download',
       onSelect: () => onSelected?.(entry.rom_id),
     }))} />
   );
