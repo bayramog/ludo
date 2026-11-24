@@ -11,7 +11,7 @@ import { _libGamesCache, libCacheSetDownloaded, _focusedPlatform, _setFocusedPla
 import { V2Focus, V2_FOCUS_STYLE} from "./focus";
 import { CoverPip, GameCover, ScreenshotArt, awaitCover, peekCover, qGetImageBg } from "./media";
 import { cancelDetailPrefetch, scheduleDetailPrefetch } from "./detailcache";
-import { PlatformIcon, ProgressRing, UserMenuRow, MODAL_SCRIM_INSET, PickerModal, ToastCover, okHints} from "./kit";
+import { PlatformIcon, ProgressRing, UserMenuRow, MODAL_SCRIM_INSET, PickerModal, ToastCover} from "./kit";
 import { FaBan, FaBookmark, FaBoxOpen, FaCheck, FaCheckCircle, FaChevronLeft, FaChevronRight, FaClone, FaCloudUploadAlt, FaDownload, FaEllipsisH, FaGlobe, FaInfoCircle, FaPlay, FaSync, FaTrash, FaUnlink, FaGamepad, FaMicrochip, FaStopwatch} from "react-icons/fa";
 import { _broadcastLibRefresh } from "./events";
 import { MdFlashOn } from "react-icons/md";
@@ -803,12 +803,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
       onSecondaryActionDescription="Details"
       onOptionsButton={dl ? requestDelete : undefined}
       onOptionsActionDescription={dl ? (confirmDelete ? 'Confirm delete' : 'Delete') : undefined}
-      {...okHints(
-        dl ? (isMulti ? 'Launch' : resume ? 'Resume' : 'Launch') : game.no_server_file ? 'No file' : 'Download',
-        // A hold opens the version picker: regions, or a multi-disc game's discs.
-        // Before a download only the regions can be picked.
-        isMultiRegion || (dl && isMultiDisc && discsAreRegion) ? 'Regions'
-          : dl && isMultiDisc ? 'Discs' : undefined)}
+      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : isMultiRegion ? 'Download (hold: regions)' : 'Download'}
       onFocus={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); scheduleDetailPrefetch(game.rom_id); if (index !== undefined) onFocusIdx?.(index); _tileFocusScrub(selfRef.current, game.name); }}
       onBlur={() => { setFocused(false); cancelDetailPrefetch(); }}
       onMouseEnter={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); }}

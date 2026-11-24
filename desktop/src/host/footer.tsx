@@ -75,14 +75,12 @@ const KBM_SLOTS: Record<string, Binding[]> = {
 // One hint: the glyph(s) for a slot plus what the action does. Renders nothing
 // when the active set has no binding for the slot (e.g. select/start on
 // keyboard+mouse) — a label with no button attached would be noise.
-// `hold`: the action of holding the button, drawn "Hold [A] label".
-function Hint({ set, slot, label, hold }: { set: GlyphSet; slot: string; label?: string; hold?: boolean }) {
+function Hint({ set, slot, label }: { set: GlyphSet; slot: string; label?: string }) {
   if (!label) return null;
   const binds = set === "kbm" ? KBM_SLOTS[slot] : [GAMEPAD_SLOTS[set][slot]];
   if (!binds || binds.some((b) => !b)) return null;
   return (
     <span className="desk-legend-hint">
-      {hold && <span className="desk-legend-label">Hold</span>}
       {/* Multi-glyph slots are chords, e.g. Shift+Enter. */}
       <span className="desk-legend-chord">
         {binds.map((b, i) => (
@@ -152,7 +150,6 @@ export function FooterLegend() {
       </div>
       <div className="desk-legend-group">
         <Hint set={set} slot="ok" label={legend.ok} />
-        <Hint set={set} slot="ok" label={legend.okHold} hold />
         <Hint set={set} slot="secondary" label={legend.secondary} />
         <Hint set={set} slot="options" label={legend.options} />
         <Hint set={set} slot="cancel" label={legend.cancel} />

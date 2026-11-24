@@ -55,7 +55,6 @@ export function registerFocusable(el: HTMLElement, handlers: FocusHandlers) {
 
 export type ActionDescs = {
   ok?: string;         // A / cross
-  okHold?: string;     // holding A, shown as its own "Hold A" hint
   secondary?: string;  // X / square
   options?: string;    // Y / triangle
   activatable?: boolean; // has onActivate/onClick → A defaults to "Select"
@@ -65,7 +64,6 @@ export type ActionDescs = {
 };
 
 export type Legend = {
-  okHold?: string;
   ok?: string; cancel?: string; secondary?: string;
   options?: string; select?: string; start?: string;
 };
@@ -88,7 +86,6 @@ export function computeLegend(target: HTMLElement | null): Legend {
     if (get) {
       const d = get();
       if (out.ok == null && d.ok) out.ok = d.ok;
-      if (out.okHold == null && d.okHold) out.okHold = d.okHold;
       if (out.secondary == null && d.secondary) out.secondary = d.secondary;
       if (out.options == null && d.options) out.options = d.options;
       if (out.cancel == null && d.canCancel) out.cancel = "Back";
