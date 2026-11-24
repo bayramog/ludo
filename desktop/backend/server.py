@@ -33,6 +33,17 @@ from urllib.parse import parse_qs, unquote, urlparse
 # `ludo_app` is a package both shells install; nothing here reaches into
 # decky_plugin/. The three facts that differ between the shells are passed in
 # as a HostProfile rather than patched onto module globals.
+# Which profile this launch opens, decided before the backend is imported: it
+# reads the profile's state directory at import time. An explicit choice comes
+# in as LUDO_PROFILE (the shell's --profile); otherwise the Steam account that
+# launched the app picks its own profile (see romm_sync_engine.profiles).
+from romm_sync_engine import paths as _paths, profiles as _profiles  # noqa: E402
+_paths.set_app_id("ludo")
+_paths.set_library_dir_name("Ludo")
+_profiles.launch = _profiles.resolve(os.environ.get("LUDO_PROFILE") or None)
+_paths.set_profile(_profiles.launch["id"])
+_profiles.mark_used(_profiles.launch["id"])
+
 import ludo_app.backend  # noqa: E402
 from ludo_app.backend import LudoBackend  # noqa: E402
 from ludo_app.host import HostProfile, read_package_version  # noqa: E402
@@ -151,6 +162,8 @@ class Engine:
         self.loop = asyncio.new_event_loop()
         self.plugin = LudoBackend(host=DESKTOP_HOST)
         self._ready = threading.Event()
+        self._state_lock = threading.Lock()
+        self._stopping = False
         self._thread = threading.Thread(target=self._run, name="engine-loop",
                                          daemon=True)
 
@@ -158,9 +171,19 @@ class Engine:
         asyncio.set_event_loop(self.loop)
         # _main() constructs the sync managers and starts the watchdog threads,
         # exactly as Decky's load path does.
-        self.loop.run_until_complete(self.plugin._main())
-        self._ready.set()
-        self.loop.run_forever()
+        try:
+            self.loop.run_until_complete(self.plugin._main())
+            self._ready.set()
+            self.loop.run_forever()
+        finally:
+            pending = asyncio.all_tasks(self.loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                self.loop.run_until_complete(asyncio.wait(pending, timeout=.5))
+            # Running worker threads cannot be killed; never join the default
+            # executor here. The backend owns and bounds its RPC worker drain.
+            self.loop.close()
 
     def start(self, timeout=60):
         self._thread.start()
@@ -174,17 +197,40 @@ class Engine:
         if (method.startswith("_") or fn is None
                 or not inspect.iscoroutinefunction(fn)):
             raise LookupError(method)
-        fut = asyncio.run_coroutine_threadsafe(fn(*args), self.loop)
+        with self._state_lock:
+            if self._stopping or self.loop.is_closed():
+                raise RuntimeError('Ludo backend is stopping')
+            fut = asyncio.run_coroutine_threadsafe(fn(*args), self.loop)
         return fut.result()
 
+    async def _shutdown(self):
+        current = asyncio.current_task()
+        pending = {task for task in asyncio.all_tasks() if task is not current}
+        for task in pending:
+            task.cancel()
+        if pending:
+            _, remaining = await asyncio.wait(pending, timeout=.5)
+            if remaining:
+                logging.warning('Desktop stop: %s RPC tasks did not cancel promptly', len(remaining))
+        await self.plugin._unload()
+
     def stop(self):
+        with self._state_lock:
+            if self._stopping:
+                return
+            self._stopping = True
+            if self.loop.is_closed():
+                return
+            fut = asyncio.run_coroutine_threadsafe(self._shutdown(), self.loop)
         try:
-            fut = asyncio.run_coroutine_threadsafe(self.plugin._unload(),
-                                                   self.loop)
-            fut.result(timeout=10)
-        except Exception:
-            pass
+            fut.result(timeout=8)
+        except Exception as e:
+            logging.warning('Desktop engine shutdown incomplete: %s', e)
+            fut.cancel()
         self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join(timeout=1)
+        if self._thread.is_alive():
+            logging.warning('Desktop engine loop thread is still stopping')
 
 
 ENGINE: Engine | None = None

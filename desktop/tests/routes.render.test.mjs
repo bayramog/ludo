@@ -52,8 +52,8 @@ const ROUTES = [
   { path: "/romm-sync-emulators", says: "Emulators" },
   { path: "/romm-sync-bios", says: "BIOS" },
   { path: "/romm-sync-platforms", says: "Platforms" },
+  { path: "/romm-sync-regions", says: "Region order" },
   { path: "/romm-sync-downloads", says: "No active downloads" },
-  { path: "/romm-sync-config", says: "RomM Connection Setup" },
   { path: "/romm-sync-library", says: "Collections" },
   // These two take their parameters decoratively — the pages read module-level
   // state the previous screen set, so arriving cold is a legitimate state with
@@ -347,4 +347,43 @@ describe("rendering with a populated library", { skip: SKIP }, () => {
       await r.close();
     }
   });
+
+  // Keyboard and mouse reach Details with one key or click: Space and
+  // right-click (they used to need Shift+Enter / Shift+click).
+  test("M on Home opens the account menu", async () => {
+    const r = await openRoute(browser, srv.origin, "/romm-sync-library");
+    try {
+      // Any card on Home: none has an options action of its own, so M
+      // reaches the page's Account.
+      await r.page.evaluate(() => [...document.querySelectorAll(".desk-focusable")]
+        .find((e) => e.getBoundingClientRect().top > 80 && e.getBoundingClientRect().width > 0)?.focus());
+      await r.page.keyboard.press("m");
+      await r.page.waitForTimeout(800);
+      const open = await r.page.evaluate(() => [...document.querySelectorAll("*")]
+        .some((e) => e.childElementCount === 0 && e.textContent === "Settings" && !e.closest("[inert]") && e.closest(".desk-modal")));
+      assert.ok(open, "M did not open the account menu");
+    } finally {
+      await r.close();
+    }
+  });
+
+  for (const how of ["Space", "right-click"]) {
+    test(`${how} on a game card opens Details`, async () => {
+      const r = await openRoute(browser, srv.origin, "/romm-sync-library");
+      try {
+        await r.activateText("Platforms");
+        await r.activateText("Test Platform");
+        if (how === "Space") {
+          await r.activateText("Harness Test Game", { key: "Space" });
+        } else {
+          await r.page.getByText("Harness Test Game", { exact: true }).first().click({ button: "right" });
+          await r.page.waitForTimeout(1200);
+        }
+        const p = await r.probe();
+        assert.ok(p.text.includes("Overview"), `${how} did not open Details: ${p.text.slice(0, 200)}`);
+      } finally {
+        await r.close();
+      }
+    });
+  }
 });

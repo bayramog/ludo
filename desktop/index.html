@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ludo</title>
+    <!-- The app's own background from the first frame: a profile switch reloads
+         the page, and anything lighter flashed before the CSS arrived. -->
+    <style>html, body { background: #07070f; }</style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Over a profile switch's restart, the app boots under this until the
+         new profile's first screen is drawn (initProfiles lifts it), so no
+         half-built frame shows. A normal launch drops it at once. -->
+    <div id="boot-cover" style="position:fixed;inset:0;background:#07070f;z-index:2147483647;transition:opacity .2s ease"></div>
+    <script>
+      if (!sessionStorage.getItem("romm:switching")) document.getElementById("boot-cover").remove();
+      else setTimeout(() => document.getElementById("boot-cover")?.remove(), 8000);  // never strand it
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

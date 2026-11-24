@@ -25,6 +25,7 @@ import { SetupWizard } from "./pages/setup";
 import { primePlatformSummary, SettingsPage } from "./pages/settings";
 import { BiosPage } from "./pages/bios";
 import { PlatformsPage } from "./pages/platforms";
+import { RegionsPage } from "./pages/regions";
 import { PlayTimePage } from "./pages/playtime";
 import { GameDetailPage } from "./pages/game";
 import { LibraryRootPage, LibraryGamesPage } from "./pages/library";
@@ -33,6 +34,7 @@ import { stopBackgroundMonitoring, startBackgroundMonitoring } from "./notificat
 import { setPreDownloadHook, watchBackgroundInstalls } from "./downloads";
 import { maybePromptSwitchFirmware } from "./firmware";
 import { watchSaveConflicts } from "./saveConflict";
+import { initProfiles } from "./profiles";
 
 /**
  * Re-exported so the app's public surface stays two names.
@@ -99,6 +101,7 @@ export function startApp(): { stop: () => void } {
   routerHook.addRoute("/romm-sync-emulators", () => <RouteGuard><EmulatorsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-bios", () => <RouteGuard><BiosPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-platforms", () => <RouteGuard><PlatformsPage /></RouteGuard>, { exact: true });
+  routerHook.addRoute("/romm-sync-regions", () => <RouteGuard><RegionsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-playtime", () => <RouteGuard><PlayTimePage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-downloads", () => <RouteGuard><DownloadsPage /></RouteGuard>, { exact: true });
   routerHook.addRoute("/romm-sync-library", () => <RouteGuard><LibraryRootPage /></RouteGuard>, { exact: true });
@@ -201,6 +204,10 @@ export function startApp(): { stop: () => void } {
     } catch (e) { console.error('[RomM] startup update check', e); }
   })();
 
+  // A Steam account with no profile yet, on a machine with several, is asked
+  // who is playing before anything else (desktop only; see profiles.tsx).
+  void initProfiles();
+
   // Re-bind the launch intercept if the Ludo tile was added in a prior session,
   // and auto-open the setup wizard once when no connection is configured.
   (async () => {
@@ -257,6 +264,7 @@ export function startApp(): { stop: () => void } {
       routerHook.removeRoute("/romm-sync-emulators");
       routerHook.removeRoute("/romm-sync-bios");
       routerHook.removeRoute("/romm-sync-platforms");
+      routerHook.removeRoute("/romm-sync-regions");
       routerHook.removeRoute("/romm-sync-downloads");
       routerHook.removeRoute("/romm-sync-library");
       routerHook.removeRoute("/romm-sync-library/:key");

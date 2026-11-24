@@ -78,10 +78,11 @@ def main():
         touch(home / 'AppImages' / 'Eden-1.0.AppImage', exec_=True)
         check('other appimages ignored',
               find_standalone_executable('cemu', spec), str(app))
-        # Not executable -> not adopted.
+        # Downloaded without +x -> adopted, and the bit is set for the user.
         app.chmod(0o644)
-        check('non-executable appimage ignored',
-              find_standalone_executable('cemu', spec), '')
+        check('non-executable appimage made executable',
+              find_standalone_executable('cemu', spec), str(app))
+        check('exec bit added', bool(app.stat().st_mode & 0o100), True)
         app.chmod(0o755)
 
         # --- flatpak wins over AppImage; both are listed ---------------------
