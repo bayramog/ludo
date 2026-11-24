@@ -36,6 +36,7 @@ PlaySessions and feeds it launches and emulator up/down observations.
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -88,6 +89,14 @@ def suspended_seconds():
     CLOCK_BOOTTIME counts suspend and CLOCK_MONOTONIC doesn't, so their
     difference grows by exactly the time asleep."""
     try:
+        if os.name == 'nt':
+            import ctypes
+            total, awake = ctypes.c_uint64(), ctypes.c_uint64()
+            kernel = ctypes.windll.kernelbase
+            kernel.QueryInterruptTime(ctypes.byref(total))
+            if not kernel.QueryUnbiasedInterruptTime(ctypes.byref(awake)):
+                return None
+            return max(0, total.value - awake.value) / 10_000_000
         return time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC)
     except (AttributeError, OSError):
         return None
@@ -95,8 +104,24 @@ def suspended_seconds():
 
 def boot_id():
     try:
+        if os.name == 'nt':
+            import ctypes
+            import uuid
+
+            # SystemBootEnvironmentInformation starts with the kernel's boot
+            # GUID. Wall-clock estimates of boot time can drift across restarts.
+            class BootEnvironment(ctypes.Structure):
+                _fields_ = [('guid', ctypes.c_ubyte * 16), ('firmware', ctypes.c_uint32),
+                            ('flags', ctypes.c_uint64)]
+
+            info = BootEnvironment()
+            status = ctypes.windll.ntdll.NtQuerySystemInformation(
+                90, ctypes.byref(info), ctypes.sizeof(info), None)
+            if status == 0 and any(info.guid):
+                return str(uuid.UUID(bytes_le=bytes(info.guid)))
+            return None
         return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    except OSError:
+    except (AttributeError, OSError):
         return None
 
 

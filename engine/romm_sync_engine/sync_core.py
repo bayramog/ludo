@@ -13587,7 +13587,7 @@ class AutoSyncManager:
                     if proc.info['pid'] == current_pid:  # Skip our own process
                         continue
                         
-                    name = proc.info['name'].lower()
+                    name = (proc.info['name'] or '').lower()
                     cmdline = proc.info['cmdline'] if proc.info['cmdline'] else []
                     status = proc.info['status']
                     
@@ -13596,7 +13596,7 @@ class AutoSyncManager:
                         continue
                     
                     # More specific detection - exclude our own AppImage
-                    if name == 'retroarch':  # Exact binary name match
+                    if name == 'retroarch' or (os.name == 'nt' and name == 'retroarch.exe'):
                         return True
                     # The process name is the main thread's, and a core may
                     # rename that thread (PPSSPP does), so check the program

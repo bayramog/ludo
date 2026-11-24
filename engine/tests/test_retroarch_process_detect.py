@@ -54,6 +54,9 @@ def main():
     check('our own process is still skipped',
           running([Proc('python3', ['python3', '-m', 'ludo_app', '--retroarch-content'])]),
           False)
+    if sys.platform == 'win32':
+        check('native RetroArch executable', running([Proc('RetroArch.exe', [])]), True)
+        check('similar executable is independent', running([Proc('retroarch-updater.exe', [])]), False)
     check('nothing running', running([]), False)
     if FAILURES:
         print(f"\nFAILED: {', '.join(FAILURES)}")
