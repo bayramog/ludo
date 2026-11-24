@@ -35,7 +35,10 @@ else:
 
 def run(home, action, user, mode="normal"):
     # A temp HOME hides ~/.local site-packages, so hand down our import path.
-    env = {**os.environ, "HOME": home, "USER": user, "LOGNAME": user,
+    env = {**os.environ, "HOME": home, "USERPROFILE": home,
+           "LOCALAPPDATA": str(Path(home) / 'AppData' / 'Local'),
+           "APPDATA": str(Path(home) / 'AppData' / 'Roaming'),
+           "USER": user, "LOGNAME": user,
            "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     return subprocess.run([sys.executable, "-c", PROG, ENGINE, action, mode],
                           env=env, capture_output=True, text=True).stdout.strip().splitlines()[-1]
