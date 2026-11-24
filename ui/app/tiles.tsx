@@ -317,7 +317,13 @@ export function openRegionPicker(
   const tagsOf = (e: typeof all[number]) => versionTags(e.file);
   const tags = all.map(tagsOf);
   const tagClash = (t: string) => tags.indexOf(t) !== tags.lastIndexOf(t);
-  const tagExt = (e: typeof all[number]) => tagsOf(e) + '|' + (e.ext || '');
+  // What the file name adds after its tags ("_wua" in "Terraria (Europe)_wua"),
+  // else its format: the tell between two versions whose tags are the same.
+  const tellOf = (e: typeof all[number]) => {
+    const after = (e.file || '').replace(/^.*\)/, '').replace(/^[\s_.-]+/, '').trim();
+    return (e.file || '').includes(')') && after ? after : e.ext ? `.${e.ext}` : '';
+  };
+  const tagExt = (e: typeof all[number]) => tagsOf(e) + '|' + tellOf(e);
   const tagExts = all.map(tagExt);
   const flagStyle = { fontFamily: EMOJI_FONT, letterSpacing: '2px' };
   const nameOf = (e: typeof all[number]): any => {
@@ -326,7 +332,7 @@ export function openRegionPicker(
     if (!t || tagExts.indexOf(tagExt(e)) !== tagExts.lastIndexOf(tagExt(e))) return plain;
     const p = versionParts(e.file);
     const text = [p.region, ...p.rest].filter(Boolean).join(' · ')
-      + (tagClash(t) && e.ext ? ` · .${e.ext}` : '');
+      + (tagClash(t) && tellOf(e) ? ` · ${tellOf(e)}` : '');
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
         {p.flags.length > 0 && <span style={flagStyle}>{p.flags.join('')}</span>}
@@ -344,7 +350,7 @@ export function openRegionPicker(
       key: entry.rom_id,
       label: <>
         {nameOf(entry)}
-        {statusOf(entry.rom_id) && <span style={{ color: V2.fgMuted, marginLeft: '6px' }}>({statusOf(entry.rom_id)})</span>}
+        {statusOf(entry.rom_id) && <span style={{ color: V2.fgMuted, marginLeft: '6px', whiteSpace: 'nowrap' }}>({statusOf(entry.rom_id)})</span>}
       </>,
       // On disk, to download, or not downloadable: the icon says it before the
       // text does. The version last played says so after its name.

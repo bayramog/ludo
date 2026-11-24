@@ -1359,7 +1359,10 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
         `}</style>
         <div onClick={dismiss} style={{ position: 'absolute', inset: 0 }} />
         <Focusable noFocusRing autoFocus ref={panelRef} flow-children="vertical" style={{
-          position: 'relative', width: message ? '420px' : '340px', maxWidth: '90vw', boxSizing: 'border-box',
+          // Rows wider than the default (a region with its language flags)
+          // widen the panel instead of wrapping, up to a limit.
+          position: 'relative', width: message ? '420px' : 'max-content', minWidth: '340px',
+          maxWidth: message ? '90vw' : 'min(520px, 90vw)', boxSizing: 'border-box',
           fontFamily: V2.font, color: V2.fg, padding: '8px',
           display: 'flex', flexDirection: 'column',
           background: 'linear-gradient(180deg, rgba(20,20,30,0.7) 0%, rgba(10,10,18,0.78) 100%)',
