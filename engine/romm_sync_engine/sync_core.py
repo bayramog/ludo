@@ -7,6 +7,7 @@ import errno
 import os
 import sys
 import shutil
+import tempfile
 import threading
 import pickle
 import time
@@ -2051,16 +2052,24 @@ class SettingsManager:
         parser, so a save can't interleave with another writer's mutation.
         """
         with SettingsManager._lock:
-            tmp = self.config_file.with_suffix('.ini.tmp')
-            # Created owner-only: it holds credentials, and replace() below
-            # makes this file's mode the mode of settings.ini.
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, 'w') as f:
-                self.config.write(f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.config_file)
+            # mkstemp creates a private file on POSIX. On Windows the new file
+            # inherits the per-user directory's ACL. Keep both sides of the
+            # replace in this directory so the rename is atomic.
+            fd, tmp = tempfile.mkstemp(prefix='settings-', suffix='.tmp', dir=self.config_dir)
+            try:
+                try:
+                    stream = os.fdopen(fd, 'w', encoding='utf-8')
+                except BaseException:
+                    os.close(fd)
+                    raise
+                with stream:
+                    self.config.write(stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(tmp, self.config_file)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
             self._stamp()
     
     def get(self, section, key, fallback=''):
@@ -21088,7 +21097,6 @@ class BiosTrackingManager:
 
 import struct
 import zlib
-import tempfile
 
 class SteamVDFHandler:
     """Minimal binary VDF parser/writer for Steam's shortcuts.vdf.
