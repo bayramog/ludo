@@ -156,6 +156,21 @@ class PathSettingsTests(unittest.TestCase):
         self.assertEqual(settings.config_file.read_bytes(), invalid)
         self.assertFalse(list(settings.config_dir.glob('settings-*.tmp')))
 
+    def test_legacy_settings_migrate_with_ansi_stdout(self):
+        source = paths.config_dir() / 'settings.ini'
+        roms = str(self.home / 'ROM arşivi %50')
+        source.write_text('[Download]\nrom_directory = ' + roms + '\n', encoding='utf-8')
+        # A redirected Windows stdout can be CP1252 even when settings use
+        # UTF-8. A diagnostic must not interrupt loading the migrated file.
+        with io.TextIOWrapper(io.BytesIO(), encoding='cp1252') as output:
+            with patch.object(sys, 'stdout', output):
+                settings = SettingsManager()
+            output.flush()
+            self.assertIn(b'Settings migrated to latest version', output.buffer.getvalue())
+        self.assertEqual(settings.get('Download', 'rom_directory'), roms)
+        self.assertTrue(settings.config.has_section('Device'))
+        self.assertIn(roms, source.read_text(encoding='utf-8'))
+
     def test_profile_paths_reject_windows_escape_and_device_names(self):
         for name in (r'..\escape', r'C:\escape', 'C:drive', 'NUL', 'con.txt',
                      'COM1', 'a.', 'a ', 'a\x00b', 'a?b', '.hidden'):

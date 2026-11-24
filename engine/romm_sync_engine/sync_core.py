@@ -2050,7 +2050,7 @@ class SettingsManager:
         # Save if any migrations were applied
         if modified:
             self.save_settings()
-            print(f"✅ Settings migrated to latest version")
+            print("Settings migrated to latest version")
     
     def save_settings(self):
         """Save settings to file.
