@@ -473,18 +473,66 @@ export function V2Button({ children, onClick, variant = 'tonal', color, disabled
 //     primary Download (overlay-emphasis tokens).
 //   • surface, icon-only  → circular translucent-grey glass button matching the
 //     page background (RTag tokens); used for Delete / secondary actions.
+// Tap-or-hold on A / Enter: a hold (500ms) runs onHold, a shorter press runs
+// onTap on release. Steam's onActivate fires on the PRESS edge, so with a hold
+// action the tap has to wait for the release instead; onActivate returns true
+// when it took the press. Without onHold every handler is a no-op.
+export function useHoldPress(onHold: (() => void) | undefined, onTap: () => void) {
+  const timer = useRef<any>(null);
+  const fired = useRef(false);
+  const start = () => {
+    fired.current = false;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { timer.current = null; fired.current = true; onHold?.(); }, 500);
+  };
+  const release = () => {
+    if (!timer.current) return;
+    clearTimeout(timer.current); timer.current = null;
+    if (!fired.current) onTap();
+  };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  return {
+    onButtonDown: (e: any) => { if (onHold && e?.detail?.button === GamepadButton.OK) start(); },
+    onButtonUp: (e: any) => { if (onHold && e?.detail?.button === GamepadButton.OK) release(); },
+    onActivate: (e: any): boolean => {
+      if (!onHold) return false;
+      // The keyboard has no onButtonUp behind it: Enter / Space time the hold
+      // on their own key release. A pointer click (detail > 0) is a tap.
+      if (e?.type === 'keydown') {
+        if (e.repeat || timer.current) return true;
+        const key = e.key;
+        const up = (ke: KeyboardEvent) => {
+          if (ke.key !== key) return;
+          window.removeEventListener('keyup', up, true);
+          release();
+        };
+        window.addEventListener('keyup', up, true);
+        start();
+        return true;
+      }
+      if (typeof e?.detail === 'number' && e.detail > 0) return false;
+      // The pad's A: onButtonDown / onButtonUp already handle it.
+      return true;
+    },
+  };
+}
+
 // `danger` is a filled-danger pill for the delete-confirm step. Pill radius
 // throughout; controller focus paints a brand ring + slight scale.
 export function GameActionButton({ icon, label, onClick, variant = 'surface', accent, disabled, progress, progressColor,
-  onOptionsButton, optionsHint, focusRef, onFocused, onBlurred }:
+  onOptionsButton, optionsHint, focusRef, onFocused, onBlurred, onHold, okHint }:
   {
     icon: any; label?: string; onClick: () => void;
     variant?: 'emphasized' | 'surface' | 'danger'; accent?: 'danger'; disabled?: boolean;
     progress?: number | null; progressColor?: string; onOptionsButton?: () => void; optionsHint?: boolean;
     focusRef?: React.MutableRefObject<any>;
     onFocused?: () => void; onBlurred?: () => void;
+    // Holding A / Enter does this instead of onClick (a tap still clicks);
+    // okHint is the bottom bar's label for A, e.g. "Download (hold: regions)".
+    onHold?: () => void; okHint?: string;
   }) {
   const [active, setActive] = useState(false);
+  const hold = useHoldPress(onHold && !disabled ? onHold : undefined, () => !disabled && onClick());
   const labelled = !!label;
   const hasProgress = typeof progress === 'number';
   const pct = hasProgress ? Math.max(0, Math.min(100, progress as number)) : 0;
@@ -547,8 +595,10 @@ export function GameActionButton({ icon, label, onClick, variant = 'surface', ac
   const glow = active ? { boxShadow: `0 0 0 2px ${ring}` } : {};
   return (
     <Focusable noFocusRing ref={focusRef}
-      onActivate={() => !disabled && onClick()}
+      onActivate={(e: any) => { if (!hold.onActivate(e)) { if (!disabled) onClick(); } }}
       onClick={() => !disabled && onClick()}
+      onButtonDown={hold.onButtonDown} onButtonUp={hold.onButtonUp}
+      onOKActionDescription={okHint}
       onOptionsButton={onOptionsButton ? () => !disabled && onOptionsButton() : undefined}
       onOptionsActionDescription={onOptionsButton ? 'Select disc' : undefined}
       onFocus={() => { setActive(true); onFocused?.(); }} onBlur={() => { setActive(false); onBlurred?.(); }}

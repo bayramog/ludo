@@ -8835,11 +8835,17 @@ class LudoBackend:
                        if isinstance(r, dict) and _no_server_file(r)]
             if g.get('no_server_file'):
                 no_file.append(rom_id)
+            variants = self._variant_downloads(g)
             downloaded = [rid for rid in ids if idx.get(rid, {}).get('is_downloaded')]
+            # A variant download marks this game downloaded too, with the
+            # variant's path as its own: that is not this version on disk.
+            variant_paths = {str(v.get('local_path')) for v in variants.values() if v.get('local_path')}
+            if rom_id in downloaded and str(g.get('local_path')) in variant_paths:
+                downloaded.remove(rom_id)
             # Variants have no entry in the index (they're folded into this
             # game), so the region picker learns which ones are already on disk
             # from what the parent recorded.
-            for vid, v in self._variant_downloads(g).items():
+            for vid, v in variants.items():
                 if vid not in downloaded and v.get('local_path'):
                     downloaded.append(vid)
             return {'success': True, 'downloaded_ids': downloaded,

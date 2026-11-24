@@ -260,7 +260,7 @@ export function versionTags(file?: string): string {
   return [asRegion(groups[region]), ...groups.filter((_, i) => i !== region)].join(' · ');
 }
 
-function openRegionPicker(
+export function openRegionPicker(
   romId: number, gameName: string,
   siblings: { rom_id: number; name: string; fs_name_no_ext?: string; fs_extension?: string }[],
   downloadedIds: Set<number>,
@@ -446,7 +446,10 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
   const showRegionPicker = async () => {
     const ids = (await ensureSiblings(true)) || downloadedRegionIds;
     openRegionPicker(game.rom_id, game.name, game.sibling_roms || [], ids,
-      activeRegionId, handleRegionSelected, game.file_name, dl, noFileRegionIds.current);
+      activeRegionId, (picked) => handleRegionSelected(picked, ids), game.file_name,
+      // The backend lists which versions are on disk, this one included; `dl`
+      // is true once any version is.
+      ids.has(game.rom_id), noFileRegionIds.current);
   };
   // Hold A to open the disc/region picker; a quick press launches. The OK
   // button's onActivate fires on the PRESS edge on Steam Deck, so we can't let
@@ -571,9 +574,10 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
     } catch (e) { toaster.toast({ title: 'Launch failed', body: String(e) }); }
     finally { setBusy(null); }
   };
-  const handleRegionSelected = async (selectedRomId: number) => {
-    const isMainRom = selectedRomId === game.rom_id;
-    const isAlreadyDownloaded = isMainRom ? dl : downloadedRegionIds.has(selectedRomId);
+  const handleRegionSelected = async (selectedRomId: number, onDisk?: Set<number>) => {
+    // `onDisk` is what the picker was opened with: this closure is older than
+    // the state update ensureSiblings made just before.
+    const isAlreadyDownloaded = (onDisk || downloadedRegionIds).has(selectedRomId);
     if (!isAlreadyDownloaded) {
       if (busy) { toaster.toast({ title: 'Busy', body: 'Please wait for the current operation' }); return; }
       if (offline) {
