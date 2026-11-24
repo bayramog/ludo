@@ -2099,7 +2099,7 @@ export function GameDetailPage() {
             ) : !isDownloaded ? (
               <GameActionButton variant="emphasized" focusRef={ctaRef} disabled={!!busy || downloading} onClick={() => { void doDownload(); }}
                 onHold={isMultiRegion ? openRegions : undefined}
-                okHint={isMultiRegion && !downloading ? 'Download (hold: Regions)' : undefined}
+                okHint={downloading ? undefined : isMultiRegion ? 'Download (hold: Regions)' : 'Download'}
                 progress={downloading ? (dlProg?.exact ?? dlPct ?? 0) : undefined}
                 label={downloading
                   ? (extracting ? `${dlProg?.message || 'Extracting…'}${dlPct != null ? ` ${padPct(dlPct)}%` : ''}`
@@ -2114,6 +2114,7 @@ export function GameDetailPage() {
               <GameActionButton accent={cancelArm.armed ? undefined : 'danger'}
                 variant={cancelArm.armed ? 'danger' : 'surface'}
                 onClick={cancelArm.press} onBlurred={cancelArm.disarm}
+                okHint={cancelArm.armed ? 'Confirm cancel' : 'Cancel download'}
                 icon={<FaTimes size={14} />} />
             )}
             {!isDownloaded ? null : !confirmDelete ? (
@@ -2121,7 +2122,7 @@ export function GameDetailPage() {
                 <GameActionButton variant="emphasized" focusRef={ctaRef} disabled={!!busy || noEmulator}
                   onClick={() => doLaunch()}
                   onHold={isMultiRegion && !noEmulator ? openRegions : undefined}
-                  okHint={isMultiRegion && !noEmulator ? `${resumable ? 'Resume' : 'Play'} (hold: Regions)` : undefined}
+                  okHint={noEmulator ? undefined : `${resumable ? 'Resume' : 'Play'}${isMultiRegion ? ' (hold: Regions)' : ''}`}
                   onFocused={() => setCtaFocused(true)} onBlurred={() => setCtaFocused(false)}
                   onOptionsButton={isMultiDisc && !noEmulator ? openDiscMenu : undefined}
                   optionsHint={isMultiDisc && !noEmulator}
@@ -2136,7 +2137,7 @@ export function GameDetailPage() {
                       : 'No emulator installed — install RetroArch from Home to play.'}
                   </span>
                 )}
-                <GameActionButton variant="surface" accent="danger" onClick={() => setConfirmDelete(true)}
+                <GameActionButton variant="surface" accent="danger" onClick={() => setConfirmDelete(true)} okHint="Delete"
                   icon={<FaTrash size={15} />} />
                 {/* Sits beside Play rather than replacing it: a save going up
                     doesn't stop you launching again, and swapping the CTA out
@@ -2153,12 +2154,12 @@ export function GameDetailPage() {
               </>
             ) : (
               <>
-                <GameActionButton variant="danger" disabled={!!busy} onClick={doDelete}
+                <GameActionButton variant="danger" disabled={!!busy} onClick={doDelete} okHint="Confirm delete"
                   label={busy === 'delete' ? 'Deleting…' : orphan ? 'Delete for good' : 'Confirm delete'}
                   icon={busy === 'delete'
                     ? <FaSync size={15} style={{ animation: 'spin 1s linear infinite' }} />
                     : <FaTrash size={15} />} />
-                <GameActionButton variant="surface" onClick={() => setConfirmDelete(false)}
+                <GameActionButton variant="surface" onClick={() => setConfirmDelete(false)} okHint="Cancel"
                   icon={<FaTimes size={16} />} />
                 {/* Deleting a normal game is undoable — it is still on RomM. For
                     an orphan this local copy is the last one, so the confirm
