@@ -15,7 +15,7 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const next = (events, name) => once(events, name, { signal: AbortSignal.timeout(75000) });
 
 function fixtureEnvironment(root) {
-  const env = {};
+  const env = { USERNAME: "ludo-test", USER: "ludo-test" };
   for (const key of ["PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "SystemDrive",
                      "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "LANG", "LC_ALL"]) {
     if (process.env[key]) env[key] = process.env[key];
@@ -84,15 +84,15 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
       },
     });
     // A real startup error should fail immediately and include Python's diagnostic.
-    const startup = Promise.race([
+    const windowResult = () => Promise.race([
       next(events, "load").then(() => "loaded"), next(events, "dialog").then(([msg]) => msg),
     ]);
     if (mode === "occupied port") {
-      assert.match(await startup, /10048|10013|address already in use/i);
+      assert.match(await windowResult(), /10048|10013|address already in use/i);
       assert.ok(children[0].exitCode);
       return;
     }
-    assert.equal(await startup, "loaded");
+    assert.equal(await windowResult(), "loaded");
     const rpc = async (method, ...args) => {
       const res = await fetch(`http://127.0.0.1:${port}/api/${method}`, {
         method: "POST", body: JSON.stringify({ args }), signal: AbortSignal.timeout(5000),
@@ -104,9 +104,9 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
     assert.equal((await rpc("get_profiles")).current, "default");
     const created = await rpc("create_profile", "İzmir 東京");
     assert.equal(created.status, "reload", JSON.stringify(created));
-    const reloaded = next(events, "load");
+    const reloaded = windowResult();
     ipc.emit("romm:reload-backend");
-    await reloaded;
+    assert.equal(await reloaded, "loaded");
     assert.equal(children.length, 2);
     assert.equal(children[0].exitCode, 0, "old backend exited gracefully before rebinding");
     assert.equal((await rpc("get_profiles")).current, created.id);
