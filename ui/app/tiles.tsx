@@ -12,7 +12,7 @@ import { V2Focus, V2_FOCUS_STYLE} from "./focus";
 import { CoverPip, GameCover, ScreenshotArt, awaitCover, peekCover, qGetImageBg } from "./media";
 import { cancelDetailPrefetch, scheduleDetailPrefetch } from "./detailcache";
 import { PlatformIcon, ProgressRing, UserMenuRow, MODAL_SCRIM_INSET, PickerModal, ToastCover} from "./kit";
-import { FaBan, FaBookmark, FaBoxOpen, FaCheck, FaChevronLeft, FaChevronRight, FaClone, FaCloudUploadAlt, FaDownload, FaEllipsisH, FaGlobe, FaInfoCircle, FaPlay, FaSync, FaTrash, FaUnlink, FaGamepad, FaMicrochip, FaStopwatch} from "react-icons/fa";
+import { FaBan, FaBookmark, FaBoxOpen, FaCheck, FaCheckCircle, FaChevronLeft, FaChevronRight, FaClone, FaCloudUploadAlt, FaDownload, FaEllipsisH, FaGlobe, FaInfoCircle, FaPlay, FaSync, FaTrash, FaUnlink, FaGamepad, FaMicrochip, FaStopwatch} from "react-icons/fa";
 import { _broadcastLibRefresh } from "./events";
 import { MdFlashOn } from "react-icons/md";
 import { _forceGamepadFocus } from "./shell";
@@ -304,13 +304,24 @@ export function openRegionPicker(
     return tagClash(t) ? plain : t;
   };
 
+  const onDisk = (id: number) => (id === romId ? !!mainDownloaded : downloadedIds.has(id));
+
   showModal(
     <PickerModal title="Select region" items={all.map((entry) => ({
       key: entry.rom_id,
       label: nameOf(entry)
         + (noFile(entry.rom_id) ? ' (no file)'
-          : !(entry.rom_id === romId ? mainDownloaded : downloadedIds.has(entry.rom_id)) ? ' (not downloaded)' : ''),
-      active: entry.rom_id === lastUsedId && !noFile(entry.rom_id),
+          : !onDisk(entry.rom_id) ? ' (not downloaded)' : ''),
+      // On disk, to download, or not downloadable: the icon says it before the
+      // text does. The version last played says so after its name.
+      icon: noFile(entry.rom_id) ? <FaBan size={13} style={{ color: V2.fgFaint }} />
+        : onDisk(entry.rom_id) ? <FaCheckCircle size={14} style={{ color: V2.success }} />
+        : <FaDownload size={13} style={{ color: V2.fgMuted }} />,
+      // Only a version on disk can have been the last one played: the tile's
+      // default before any launch is the game itself, wherever its file is.
+      trailing: entry.rom_id === lastUsedId && onDisk(entry.rom_id) && !noFile(entry.rom_id)
+        ? <span style={{ marginLeft: 'auto', paddingLeft: '12px', fontSize: '11px', fontWeight: 600, color: V2.brand, whiteSpace: 'nowrap' }}>Last played</span>
+        : undefined,
       onSelect: () => onSelected?.(entry.rom_id),
     }))} />
   );

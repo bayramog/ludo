@@ -1329,7 +1329,9 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
   // Shown between the message and the rows (e.g. a QR code).
   children?: any;
   // keepOpen: the row acts inside the modal (e.g. retry) instead of closing it.
-  items: { key: string | number; label: string; active?: boolean; danger?: boolean; keepOpen?: boolean; onSelect: () => void }[];
+  // icon replaces the active check; trailing sits after the label.
+  items: { key: string | number; label: string; active?: boolean; danger?: boolean; keepOpen?: boolean;
+    icon?: any; trailing?: any; onSelect: () => void }[];
   onDismiss?: () => void;
   closeModal?: () => void;
 }) {
@@ -1378,8 +1380,8 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
           <div style={{ height: '1px', background: V2.border, margin: '0 4px 4px' }} />
           {items.map((it) => (
             <UserMenuRow key={it.key}
-              icon={it.active ? <FaCheck size={14} style={{ color: V2.brand }} /> : null}
-              label={it.label} danger={it.danger}
+              icon={it.icon !== undefined ? it.icon : it.active ? <FaCheck size={14} style={{ color: V2.brand }} /> : null}
+              label={it.label} danger={it.danger} trailing={it.trailing}
               onSelect={() => { if (!it.keepOpen) closeModal?.(); it.onSelect(); }} />
           ))}
         </Focusable>
