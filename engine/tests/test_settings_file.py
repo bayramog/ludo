@@ -62,4 +62,5 @@ class SettingsFileTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    result = unittest.main(verbosity=2, exit=False).result
+    sys.exit(0 if result.wasSuccessful() and result.testsRun and not result.skipped else 1)
