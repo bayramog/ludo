@@ -531,7 +531,7 @@ export function GameActionButton({ icon, label, onClick, variant = 'surface', ac
     focusRef?: React.MutableRefObject<any>;
     onFocused?: () => void; onBlurred?: () => void;
     // Holding A / Enter does this instead of onClick (a tap still clicks);
-    // okHint is the bottom bar's label for A, e.g. "Download (hold: regions)".
+    // okHint is the bottom bar's label for A, e.g. "Download (hold: Regions)".
     onHold?: () => void; okHint?: string;
   }) {
   const [active, setActive] = useState(false);

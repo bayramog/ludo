@@ -803,7 +803,7 @@ export const GameTile = memo(function GameTile({ game, onOpen, onActiveCover, fo
       onSecondaryActionDescription="Details"
       onOptionsButton={dl ? requestDelete : undefined}
       onOptionsActionDescription={dl ? (confirmDelete ? 'Confirm delete' : 'Delete') : undefined}
-      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: regions)' : 'Launch (hold: discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : isMultiRegion ? 'Download (hold: regions)' : 'Download'}
+      onOKActionDescription={dl ? (isMultiRegion ? 'Launch (hold: Regions)' : isMultiDisc ? (discsAreRegion ? 'Launch (hold: Regions)' : 'Launch (hold: Discs)') : (resume ? 'Resume' : 'Launch')) : game.no_server_file ? 'No file' : isMultiRegion ? 'Download (hold: Regions)' : 'Download'}
       onFocus={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); scheduleDetailPrefetch(game.rom_id); if (index !== undefined) onFocusIdx?.(index); _tileFocusScrub(selfRef.current, game.name); }}
       onBlur={() => { setFocused(false); cancelDetailPrefetch(); }}
       onMouseEnter={() => { setFocused(true); activate(); ensureDiscs(); ensureSiblings(); }}
