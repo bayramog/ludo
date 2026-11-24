@@ -17,6 +17,7 @@ from functools import wraps
 from pathlib import Path
 
 from .paths import app_id, cache_dir, client_name, config_dir, library_dir, machine_cache_dir, profile_id
+from .settings_file import SETTINGS_ENCODING, read_settings
 from .process_lock import ProcessLock
 from .owned_tasks import OwnedTasks
 from .save_channels import snapshots_supported
@@ -1895,7 +1896,7 @@ class SettingsManager:
     def load_settings(self):
         """Load settings from file"""
         if self.config_file.exists():
-            self.config.read(self.config_file)
+            read_settings(self.config, self.config_file)
             self._stamp()
             # Migrate settings from older versions
             self._migrate_settings()
@@ -2058,7 +2059,7 @@ class SettingsManager:
             fd, tmp = tempfile.mkstemp(prefix='settings-', suffix='.tmp', dir=self.config_dir)
             try:
                 try:
-                    stream = os.fdopen(fd, 'w')
+                    stream = os.fdopen(fd, 'w', encoding=SETTINGS_ENCODING)
                 except BaseException:
                     os.close(fd)
                     raise
