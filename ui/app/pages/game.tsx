@@ -1713,7 +1713,10 @@ export function GameDetailPage() {
       // a game that is on disk. The registry cannot fail and is the reason the
       // library tiles heal correctly today.
       if (game && _dlSucceeded.has(game.rom_id)) setIsDownloaded(true);
-      load();
+      // Quietly: the page is already showing this game, and the loader would
+      // swap its tab for "Loading details…" for as long as RomM takes to
+      // answer, seconds right after a download.
+      load(true);
     }
     prevDownloading.current = downloading;
   }, [downloading]);
