@@ -221,6 +221,24 @@ def credentials(d):
     check('owner-only after a rewrite', stat.S_IMODE(ini.stat().st_mode), 0o600)
 
 
+def failed_settings_replace(d):
+    with mock.patch.dict(os.environ, HOME=str(d / 'failed-save')):
+        settings = C.SettingsManager()
+        folder = settings.config_dir
+        original = settings.config_file.read_bytes()
+        files = set(folder.iterdir())
+        settings.config.set('System', 'debug_mode', 'true')
+        with mock.patch.object(os, 'replace', side_effect=PermissionError('replace denied')):
+            try:
+                settings.save_settings()
+            except PermissionError:
+                pass
+            else:
+                check('failed replace reported', False, True)
+        check('failed replace preserves settings', settings.config_file.read_bytes(), original)
+        check('failed replace removes temporary file', set(folder.iterdir()), files)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
@@ -228,6 +246,7 @@ def main():
         arcade()
         eden(d)
         credentials(d)
+        failed_settings_replace(d)
     print(f"{len(FAILURES)} failure(s)")
     return 1 if FAILURES else 0
 

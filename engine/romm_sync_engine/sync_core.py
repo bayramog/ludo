@@ -2058,7 +2058,7 @@ class SettingsManager:
             fd, tmp = tempfile.mkstemp(prefix='settings-', suffix='.tmp', dir=self.config_dir)
             try:
                 try:
-                    stream = os.fdopen(fd, 'w', encoding='utf-8')
+                    stream = os.fdopen(fd, 'w')
                 except BaseException:
                     os.close(fd)
                     raise
