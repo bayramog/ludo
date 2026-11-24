@@ -78,6 +78,7 @@ log = logging.getLogger(__name__)
 # library can reject a mismatched caller, and sigil_result is a caller-owned
 # out-parameter — nothing here allocates, so there is nothing to free.
 _SIGIL_RESULT_V3 = 3
+_SIGIL_RESULT_V4 = 4  # adds the N64 cart identity (sigil 4d94424)
 _SIGIL_SUPPORT_V1 = 1
 _SIGIL_OPTIONS_V1 = 1
 
@@ -117,6 +118,11 @@ class _SigilResult(ctypes.Structure):
         ('switch_content_type', ctypes.c_int),
         ('title_version', ctypes.c_uint32),
         ('features', ctypes.c_uint32),
+        # N64 cart identity (sigil 4d94424+). The library fills the whole
+        # struct, so it must match the header's size or it writes past ours.
+        ('n64_header', ctypes.c_char * 24),
+        ('n64_md5', ctypes.c_char * 33),
+        ('n64_md5_n64', ctypes.c_char * 33),
     ]
 
 
@@ -243,7 +249,7 @@ class _Sigil:
         """
         if not self._lib:
             return None
-        result = _SigilResult(struct_version=_SIGIL_RESULT_V3)
+        result = _SigilResult(struct_version=_SIGIL_RESULT_V4)
         options = _SigilOptions(struct_version=_SIGIL_OPTIONS_V1,
                                 flags=_SIGIL_FLAG_FILENAME_FALLBACK)
         support = None
@@ -608,6 +614,12 @@ def switch_content(path, prod_keys=None):
         return None
 
     result = None if compressed else _Sigil.get().extract(path, prod_keys=prod_keys)
+    # Without prod.keys Sigil answers from the filename too, but folds an
+    # update's or DLC's ID to its base game's. A tag in the name says more,
+    # so the name parse below wins then.
+    if (result and result.source == _SIGIL_SOURCE_FILENAME
+            and raw_switch_tag_in_name(path.name)):
+        result = None
     if result and result.platform == _SIGIL_PLATFORM_SWITCH:
         found = result.title_id.decode('ascii', 'replace').strip()
         kind = _SIGIL_CONTENT_KINDS.get(result.switch_content_type)

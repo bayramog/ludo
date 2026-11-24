@@ -21,8 +21,8 @@ from .owned_tasks import OwnedTasks
 from .save_channels import snapshots_supported
 from . import events as _events
 from . import (cemu_saves, eden_config, emulator_saves, folder_saves, gamecube_saves,
-               play_sessions, ps2_memcard, save_channels, switch_content, switch_nsz,
-               title_ids)
+               play_sessions, ps2_memcard, save_channels, save_convert, switch_content,
+               switch_nsz, title_ids)
 from urllib.parse import urljoin, quote, urlparse
 import socket
 import configparser
@@ -12028,7 +12028,7 @@ class RetroArchInterface:
             if not info_dir:
                 cfg_dir = self.find_retroarch_config_dir()
                 info_dir = cfg_dir / 'info' if cfg_dir else None
-            info_dir = Path(info_dir) if info_dir else None
+            info_dir = self._host_path(Path(info_dir)) if info_dir else None
             if info_dir and info_dir.is_dir():
                 for stem in dict.fromkeys((key, key.replace('_', ''))):
                     if (info_dir / f'{stem}_libretro.info').is_file():
@@ -12049,6 +12049,22 @@ class RetroArchInterface:
             found = None
         cache[key] = found
         return found
+
+    @staticmethod
+    def _host_path(path):
+        """A path from a Flatpak RetroArch's config, as the host sees it.
+
+        The Flatpak writes its bundled folders (``/app/share/libretro/info``)
+        as the sandbox sees them; outside it they live under the app's
+        ``files`` folder, in the user or the system installation."""
+        if path.is_dir() or not str(path).startswith('/app/'):
+            return path
+        rel = str(path)[len('/app/'):]
+        for root in (Path.home() / '.local/share/flatpak', Path('/var/lib/flatpak')):
+            candidate = root / 'app/org.libretro.RetroArch/current/active/files' / rel
+            if candidate.is_dir():
+                return candidate
+        return path
 
     def get_romm_emulator_name(self, retroarch_directory_name):
         """Convert RetroArch directory name to RomM emulator name using standard convention"""
@@ -17033,11 +17049,48 @@ class AutoSyncManager:
             shutil.copy2(path, path.with_suffix(path.suffix + f".local-{stamp}"))
         tmp = path.with_suffix(path.suffix + '.part')
         tmp.write_bytes(data)
-        os.replace(tmp, path)
+        converted = self._convert_channel_save(tmp, path, save, game)
+        if not converted:
+            os.replace(tmp, path)
         sync.finish_download(rom_file_id, out.channel, out.snapshot)
+        if converted:
+            # The snapshot's hashes are of the other client's unit, which
+            # the converted file never matches: held as-is, the next sync
+            # would read it as local play and push the same save back.
+            self._hold_converted(sync, rom_file_id, path)
         self.log(f"⬇️ {path.name} ← channel {(out.channel or {}).get('label')!r}")
         return save_channels.ChannelOutcome('downloaded', snapshot=out.snapshot,
                                             channel=out.channel)
+
+    def _hold_converted(self, sync, rom_file_id, path):
+        state = sync.store.get(rom_file_id)
+        local = RomMClient.compute_content_hash(path)
+        if state is None or not local:
+            return
+        state.held_content_hash = state.held_identity_hash = local
+        sync.store._save()
+
+    def _convert_channel_save(self, tmp, path, save, game):
+        """Turn a channel save another client pushed (Argosy's N64 zip of
+        eeprom/pak/sram, a DuckStation card) into the core's file at ``path``.
+        True when ``path`` now holds it; False leaves ``tmp`` for a raw write."""
+        if game is None:
+            return False
+        platform = _platform_of(game)
+        try:
+            core = self._core_for_game(game)
+        except Exception:
+            core = None
+        if not save_convert.needs_conversion(save.get('file_name'), save.get('emulator'),
+                                             platform, core):
+            return False
+        unit = tmp.with_suffix(Path(save.get('file_name') or '').suffix or '.bin')
+        os.replace(tmp, unit)
+        if save_convert.convert_into_core(unit, path, platform, core,
+                                          game.get('local_path'), self.log):
+            return True
+        os.replace(unit, tmp)
+        return False
 
     def _channel_states(self, game, emulator):
         """This game's states on disk as save_channels.LocalStates, under the
@@ -19326,6 +19379,23 @@ class AutoSyncManager:
                                     original_filename, 'saves', emulator_save_dir))
                             final_path = emulator_save_dir / retroarch_filename
 
+                    target_core = core_name
+                    if not target_core and final_path and hasattr(self, '_core_for_game'):
+                        try:
+                            target_core = self._core_for_game(game)
+                        except Exception:
+                            target_core = None
+                    convert = bool(final_path) and save_convert.needs_conversion(
+                        original_filename, romm_emulator, _platform_of(game), target_core)
+                    raw_path = final_path
+                    if convert:
+                        # The core reads <content stem>.srm whatever the server
+                        # named it (DuckStation adds _1, Argosy zips N64 units).
+                        final_path = final_path.with_name(
+                            save_convert.core_save_name(original_filename,
+                                                        game.get('local_path')))
+                        retroarch_filename = final_path.name
+
                     # Only skip download if the local file actually exists AND
                     # the API confirms this device has the current version.
                     # Never skip on "this device uploaded it": that misses a
@@ -19375,8 +19445,13 @@ class AutoSyncManager:
 
                             if self.romm_client.download_save(rom_id, 'saves', temp_path, device_id):
                                 try:
-                                    if temp_path != final_path:
-                                        temp_path.rename(final_path)
+                                    converted = convert and save_convert.convert_into_core(
+                                        temp_path, final_path, _platform_of(game), target_core,
+                                        game.get('local_path'), self.log)
+                                    if not converted:
+                                        final_path = raw_path
+                                        if temp_path != final_path:
+                                            temp_path.rename(final_path)
                                     downloads_successful += 1
                                     self.log(f"  ✅ Save ready: {retroarch_filename}")
                                     # Record fingerprint so upload worker treats this as already-uploaded,
