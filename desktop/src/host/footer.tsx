@@ -10,7 +10,7 @@
 // the connected pad's own set (Xbox / PlayStation / Switch / neutral) once the
 // pad takes over. See inputMode() for why that is not the same as "a pad is
 // plugged in".
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   computeLegend,
   currentLegendTarget,
@@ -28,7 +28,9 @@ import { Glyph, type GlyphSet } from "./glyphs";
 // slots are the actions (ok/cancel/secondary/options); the values are what the
 // user is actually looking at. Switch swaps A/B and X/Y against the standard
 // layout, so its face buttons intentionally differ from the button index.
-type Binding = { name: string; title: string };
+// `cap`: a key the icon pack has no art for, drawn as a text keycap instead.
+// `or`: an alternative to the binding before it (drawn "a / b"), not a chord.
+type Binding = { name: string; title: string; cap?: string; or?: boolean };
 const GAMEPAD_SLOTS: Record<Exclude<GlyphSet, "kbm">, Record<string, Binding>> = {
   neutral: {
     ok: { name: "a", title: "A" }, cancel: { name: "b", title: "B" },
@@ -66,8 +68,8 @@ const KBM_SLOTS: Record<string, Binding[]> = {
   navigate: [{ name: "arrows", title: "Arrow keys" }],
   ok: [{ name: "enter", title: "Enter" }],
   cancel: [{ name: "escape", title: "Escape" }],
-  secondary: [{ name: "shift", title: "Shift" }, { name: "enter", title: "Enter" }],
-  options: [{ name: "mouseRight", title: "Right click" }],
+  secondary: [{ name: "mouseRight", title: "Right click" }, { name: "space", title: "Space", cap: "Space", or: true }],
+  options: [{ name: "m", title: "M", cap: "M" }],
 };
 
 // One hint: the glyph(s) for a slot plus what the action does. Renders nothing
@@ -82,7 +84,12 @@ function Hint({ set, slot, label }: { set: GlyphSet; slot: string; label?: strin
       {/* Multi-glyph slots are chords, e.g. Shift+Enter. */}
       <span className="desk-legend-chord">
         {binds.map((b, i) => (
-          <Glyph key={i} set={set} name={b.name} title={b.title} />
+          <Fragment key={i}>
+            {b.or && <span className="desk-legend-or">/</span>}
+            {b.cap
+              ? <span className="desk-keycap" role="img" aria-label={b.title}>{b.cap}</span>
+              : <Glyph set={set} name={b.name} title={b.title} />}
+          </Fragment>
         ))}
       </span>
       <span className="desk-legend-label">{label}</span>

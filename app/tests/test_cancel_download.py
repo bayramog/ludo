@@ -85,7 +85,7 @@ async def test_a_new_download_is_not_born_cancelled(backend):
     # A cancel left over from an earlier attempt must not kill the next one.
     backend._download_cancels.add(ROM)
     backend._romm_client.download_rom = lambda *a, **k: (True, "ok")
-    backend._maybe_unzip_download = lambda dest, rid: dest
+    backend._maybe_unzip_download = lambda dest, rid, slug=None: dest
     backend._maybe_decompress_switch = lambda p, rid: p
     backend._handle_switch_add_ons = lambda *a: None
     backend._persist_snapshot_throttled = lambda: None

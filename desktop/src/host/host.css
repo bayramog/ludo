@@ -20,7 +20,7 @@
 }
 
 :root {
-  --desk-bg: #1a1f24;
+  --desk-bg: #07070f;   /* = V2.bg: a reload shows this before the page paints */
   --desk-fg: #dcdedf;
   --desk-muted: #8b929a;
   --desk-accent: #1a9fff;
@@ -248,18 +248,6 @@ div.v2pf > div {
 .romm-ct-wrap,
 .romm-ptile-wrap {
   transform: translateZ(0);
-}
-
-/* A platform's games grid mounts every tile (482 for GBA), each one a promoted
- * layer from the rule above, and the compositor re-layerized all of them on
- * every scroll frame: ~3ms of a 4ms 240Hz frame. content-visibility skips
- * tiles that are off-screen. Keep the promotion: dropping it measured slower.
- * The clip margin leaves room for the focused cover's scale and glow, which
- * paint containment would otherwise cut off. */
-.romm-games-grid > .romm-gt-wrap {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
-  overflow-clip-margin: 40px;
 }
 
 /* ── Focusable ─────────────────────────────────────────────────────────── */
@@ -611,6 +599,31 @@ body.desk-modal-open .desk-legend {
 
 /* Kenney glyphs carry their own button shape and colour, so unlike the drawn
    letters they replaced they get no border/background chrome of their own. */
+/* A key the icon pack has no art for (Space, M): a text keycap sized to sit
+   beside the 20px glyphs. */
+.desk-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 18px;
+  min-width: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.desk-legend-or {
+  opacity: 0.5;
+  font-size: 11px;
+  margin: 0 1px;
+}
+
 .desk-glyph {
   display: inline-flex;
   flex-shrink: 0;

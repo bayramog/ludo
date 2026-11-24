@@ -35,6 +35,8 @@ export const notifyNetworkState = callable<[boolean], any>("notify_network_state
 // uploads) and absent on collection-wide ones.
 export const drainNotifications = callable<[], { events: Array<{ kind: string, title: string, body: string, timestamp: number, rom_id?: number | null, has_cover?: boolean, critical?: boolean, action?: { kind: string, platform?: string } | null }> }>("drain_notifications");
 export const refreshFromRomm = callable<[boolean], any>("refresh_from_romm");
+export const getRegionOrder = callable<[], any>("get_region_order");
+export const setRegionOrder = callable<[string[]], any>("set_region_order");
 export const rebuildLibrary = callable<[], any>("rebuild_library");
 // Re-reads one platform and reconciles that slice. Takes a slug (what the
 // platform groups are keyed by) or a numeric id.
@@ -94,6 +96,14 @@ export const getConfig = callable<[], any>("get_config");
 export const logout = callable<[boolean], any>("logout");
 export const getAccountUsername = callable<[], any>("get_account_username");
 export const getAvatar = callable<[], any>("get_avatar");
+export const getProfiles = callable<[], any>("get_profiles");
+export const switchProfile = callable<[string], any>("switch_profile");
+export const createProfile = callable<[string], any>("create_profile");
+export const discardProfile = callable<[], any>("discard_profile");
+export const renameProfile = callable<[string, string], any>("rename_profile");
+export const removeProfile = callable<[string, boolean?], any>("remove_profile");
+export const linkProfileSteam = callable<[string, string], any>("link_profile_steam");
+export const unlinkProfileSteam = callable<[string], any>("unlink_profile_steam");
 export const getPluginStats = callable<[], any>("get_plugin_stats");
 // Play time (engine play_sessions + play_stats).
 export const getPlayTime = callable<[], any>("get_play_time");
@@ -133,6 +143,10 @@ export const getRomDocument = callable<[number, number], any>("get_rom_document"
 export const getRaEarned = callable<[number], any>("get_ra_earned");
 export const downloadGame = callable<[number], any>("download_game");
 export const getSwitchAddOns = callable<[number], any>("switch_add_ons");
+export const getSwitchModPackages = callable<[number], any>("switch_mod_packages");
+export const installSwitchModPackage = callable<[number, number], any>("install_switch_mod_package");
+export const removeSwitchModPackage = callable<[number, string, boolean?], any>("remove_switch_mod_package");
+export const recoverSwitchModPackages = callable<[], any>("recover_switch_mod_packages");
 export const setSwitchAddOnEnabled = callable<[number, string, boolean, string?], any>("set_switch_add_on_enabled");
 export const setSwitchUpdate = callable<[number, number | string | null], any>("set_switch_update");
 export const setSwitchDlc = callable<[number, string[]], any>("set_switch_dlc");

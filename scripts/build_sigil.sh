@@ -23,7 +23,7 @@ set -euo pipefail
 # string upstream reports has read "0.1.0-dev" for every build so far, so this
 # is the only record of which code is bundled.
 SIGIL_REPO="${SIGIL_REPO:-https://github.com/rommapp/argosy-sigil}"
-SIGIL_COMMIT="${SIGIL_COMMIT:-8a3b008}"
+SIGIL_COMMIT="${SIGIL_COMMIT:-4d94424}"
 
 # Resolved before any cd: "$0" may be relative.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,6 +69,9 @@ if [ -d "$BUNDLE_DIR" ]; then
   cp "$BUILD_DIR/libsigil.so" "$BUNDLE_DIR/libsigil.so"
   echo "==> installed into $BUNDLE_DIR/libsigil.so"
 fi
+# The header the bundled build came from, so test_sigil_saves can check the
+# ctypes mirrors in sigil_saves.py against it.
+cp "$SRC_DIR/include/sigil.h" "$REPO_ROOT/engine/tests/sigil.h"
 
 echo
 echo "built: $BUILD_DIR/libsigil.so ($(git rev-parse --short HEAD))"

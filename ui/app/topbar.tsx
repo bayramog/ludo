@@ -12,6 +12,7 @@ import { _broadcastLibRefresh } from "./events";
 import { V2_FOCUS_STYLE } from "./focus";
 import { BiosDetailModal } from "./pages/bios";
 import { _lsAvail } from "./storage";
+import { ProfilePickerModal, SwitchProfileRow, useCurrentProfileName } from "./profiles";
 // The bar across the top of the library, and the menus it opens.
 //
 // It is one component rather than per-page chrome because it has to stay put
@@ -471,6 +472,15 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
   // CollectionActionsModal's "Remove downloaded"), disarming after 4s.
   const [quitArmed, setQuitArmed] = useState(false);
   useEffect(() => { if (!quitArmed) return; const t = setTimeout(() => setQuitArmed(false), 4000); return () => clearTimeout(t); }, [quitArmed]);
+  // "Switch profile" turns this modal into the picker instead of opening a
+  // second one: stacking two blurred scrims and then removing the lower one
+  // made some GPUs drop the blur for a couple of frames (a sharp flash).
+  const [picker, setPicker] = useState(false);
+  const [fading, setFading] = useState(false);
+  // The menu panel fades out over the picker's entrance and then stays
+  // mounted, invisible and inert: removing its blurred layer from on top of
+  // the scrim's blur drops the blur for a frame or two on some GPUs.
+  useEffect(() => { if (picker) panelRef.current?.setAttribute('inert', ''); }, [picker]);
   const doQuit = () => {
     if (!quitArmed) { setQuitArmed(true); return; }
     setQuitArmed(false);
@@ -489,17 +499,20 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'rgba(7,7,15,0.45)',
           WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)',
+          opacity: fading ? 0 : 1, transition: 'opacity .16s ease-in',
         }}>
         <style>{`
           ${V2_FOCUS_STYLE}
           .romm-modal-collapse, .romm-modal-collapse > div {
             background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important;
           }
+          @keyframes umOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97); } }
           @keyframes umIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
         `}</style>
+        {picker && <ProfilePickerModal embedded closeModal={closeModal} onLeaving={() => setFading(true)} />}
         {/* Click-away scrim */}
-        <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />
-        <Focusable noFocusRing autoFocus ref={panelRef} flow-children="vertical" style={{
+        {!picker && <div onClick={() => closeModal?.()} style={{ position: 'absolute', inset: 0 }} />}
+        <Focusable noFocusRing autoFocus={!picker} ref={panelRef} flow-children="vertical" style={{
           position: 'relative', width: '260px', maxWidth: '90vw', boxSizing: 'border-box',
           fontFamily: V2.font, color: V2.fg, padding: '8px',
           display: 'flex', flexDirection: 'column',
@@ -508,7 +521,8 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           border: `1px solid rgba(255,255,255,0.12)`, borderRadius: V2.radiusCard,
           boxShadow: '0 16px 48px rgba(0,0,0,0.55)',
           maxHeight: '82vh', overflowY: 'auto',
-          animation: 'umIn 0.18s cubic-bezier(0.22,1,0.36,1)',
+          animation: picker ? 'umOut 0.12s ease-in forwards' : 'umIn 0.18s cubic-bezier(0.22,1,0.36,1)',
+          ...(picker ? { position: 'absolute', pointerEvents: 'none' } : {}),
         }}>
           {/* Identity header card — RomM UserMenu __header. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 8px 12px', minWidth: 0 }}>
@@ -538,6 +552,7 @@ export function UserMenuModal({ username, role, avatar, closeModal }:
           <UserMenuRow icon={<FaPuzzlePiece size={15} />} label="Emulator Cores" onSelect={() => go("/romm-sync-cores")} />
           <UserMenuRow icon={<FaMicrochip size={15} />} label="Firmware / BIOS" onSelect={() => go("/romm-sync-bios")} />
           <UserMenuRow icon={<FaCog size={15} />} label="Settings" onSelect={() => go("/romm-sync-settings")} />
+          <SwitchProfileRow onOpen={() => setPicker(true)} />
           {canExit && (
             <>
               <div style={{ height: '1px', background: V2.border, margin: '4px 4px' }} />
@@ -707,6 +722,9 @@ export function DownloadChip({ count, pct }: { count: number; pct: number | null
 export function UserPill({ username, role, avatar, glimpse = true }:
   { username: string; role: string; avatar: string | null; glimpse?: boolean }) {
   const [active, setActive] = useState(false);
+  // Who is playing: the profile's name, or the RomM username where there are
+  // no profiles (or before the list arrives).
+  const label = useCurrentProfileName() || username;
   // Download glimpse: while anything is downloading, the avatar gains an
   // aggregate progress ring + count dot — zero extra top-bar width (the Deck's
   // bar is too tight for a separate chip).
@@ -750,8 +768,8 @@ export function UserPill({ username, role, avatar, glimpse = true }:
       </div>
       {/* Placeholder bar while the account is still loading, so the pill keeps
           its shape instead of collapsing and then jumping to full width. */}
-      {username
-        ? <span style={{ fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap' }}>{username}</span>
+      {label
+        ? <span style={{ fontSize: '13px', fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</span>
         : <span style={{
             width: '58px', height: '9px', borderRadius: '5px',
             background: V2.bgElevated, opacity: 0.7,

@@ -53,6 +53,7 @@ export const RPC_FIXTURES = {
   get_retrodeck_button_enabled: false,
   set_retrodeck_button_enabled: false,
   get_retrodeck_logo: { success: false },
+  get_region_order: { success: true, follow: true, server: ["USA", "Europe"], order: ["USA", "Europe", "Japan"] },
   get_steam_tile_status: { success: true, present: false },
 
   // ── Updates ───────────────────────────────────────────────────────────
