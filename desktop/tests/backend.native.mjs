@@ -36,7 +36,9 @@ function fixtureEnvironment(root) {
 for (const mode of ["development", "packaged layout", "occupied port"]) {
   test(mode + " with the real " + process.platform + " backend", async t => {
     const windows = process.platform === "win32";
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "Ludo İzmir 東京 "));
+    // The installation and the account home are independent on a real PC.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ludo-lifecycle-"));
+    const install = path.join(root, "Ludo İzmir 東京");
     const children = [];
     t.after(async () => {
       for (const child of children) {
@@ -50,8 +52,8 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
     });
     const env = fixtureEnvironment(root);
     const packaged = mode !== "development";
-    const resources = path.join(root, "resources");
-    const desktop = packaged ? path.join(resources, "app-src", "desktop") : path.join(root, "desktop");
+    const resources = path.join(install, "resources");
+    const desktop = packaged ? path.join(resources, "app-src", "desktop") : path.join(install, "desktop");
     fs.mkdirSync(path.join(desktop, "backend"), { recursive: true });
     for (const file of ["server.py", "windows_lifetime.py"]) {
       const source = path.join(repo, "desktop", "backend", file);

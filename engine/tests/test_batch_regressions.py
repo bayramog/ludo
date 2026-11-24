@@ -222,7 +222,8 @@ def credentials(d):
 
 
 def failed_settings_replace(d):
-    with mock.patch.dict(os.environ, HOME=str(d / 'failed-save')):
+    home = str(d / 'failed-save')
+    with mock.patch.dict(os.environ, HOME=home, USERPROFILE=home):
         settings = C.SettingsManager()
         folder = settings.config_dir
         original = settings.config_file.read_bytes()
