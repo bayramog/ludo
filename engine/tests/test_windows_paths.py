@@ -178,6 +178,33 @@ class PathSettingsTests(unittest.TestCase):
                 with self.subTest(name=name, operation=operation.__name__), self.assertRaises(ValueError):
                     operation(name)
 
+    def test_superscript_devices_are_rejected_by_all_directory_entries(self):
+        # Windows reserves exactly these additional COM/LPT device names,
+        # including case variants and names with one or more extensions.
+        devices = ('COM¹', 'COM²', 'COM³', 'LPT¹', 'LPT²', 'LPT³')
+        operations = (paths.set_app_id, paths.set_library_dir_name,
+                      paths.set_profile, paths.profile_dir)
+        with patch.object(paths, 'machine_dir', return_value=self.home) as machine_dir:
+            for device in devices:
+                for name in (device, device.lower() + '.txt', device.title() + '.tar.gz'):
+                    for operation in operations:
+                        with self.subTest(name=name, operation=operation.__name__):
+                            with self.assertRaisesRegex(ValueError, 'invalid directory name'):
+                                operation(name)
+            machine_dir.assert_not_called()
+
+    def test_normal_unicode_directory_names_remain_valid(self):
+        for name in ('Oyun arşivi %50', '東京²', 'COM⁴', 'LPT⁴', 'COM¹ oyun', 'LPT²backup'):
+            with self.subTest(name=name), patch.multiple(paths, _locked=False,
+                                                         _profile_locked=False):
+                paths.set_app_id(name)
+                paths.set_library_dir_name(name)
+                paths.set_profile(name)
+                self.assertEqual(paths.app_id(), name)
+                self.assertEqual(paths.library_dir(), self.home / name)
+                self.assertEqual(paths.profile_id(), name)
+                self.assertEqual(paths.profile_dir(name), paths.machine_dir() / 'profiles' / name)
+
     def test_new_windows_profile_uses_local_not_roaming(self):
         with patch.object(sys, 'platform', 'win32'):
             self.assertEqual(paths.config_dir(), self.local / 'ludo')

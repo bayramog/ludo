@@ -31,8 +31,8 @@ def _validate_directory_name(name: str) -> None:
             or any(c in '<>:"/\\|?*' or ord(c) < 32 for c in name)
             or name.split('.')[0].upper() in {
                 'CON', 'PRN', 'AUX', 'NUL',
-                *(f'COM{i}' for i in range(1, 10)),
-                *(f'LPT{i}' for i in range(1, 10)),
+                *(f'COM{i}' for i in '123456789¹²³'),
+                *(f'LPT{i}' for i in '123456789¹²³'),
             }):
         raise ValueError(f"invalid directory name: {name!r}")
 
