@@ -16,6 +16,7 @@ from functools import wraps
 from pathlib import Path
 
 from .paths import app_id, cache_dir, client_name, config_dir, library_dir, machine_cache_dir, profile_id
+from .settings_file import read_settings, write_settings
 from .process_lock import ProcessLock
 from .owned_tasks import OwnedTasks
 from .save_channels import snapshots_supported
@@ -1773,7 +1774,9 @@ class SettingsManager:
                 if self._file_changed():
                     self.load_settings()
                 return
-            self.config = configparser.ConfigParser()
+            # Settings are literal values, not a template language. A valid
+            # path or URL containing '%' must survive set/load unchanged.
+            self.config = configparser.ConfigParser(interpolation=None)
             SettingsManager._shared[str(self.config_file)] = self.config
             self.load_settings()
 
@@ -1831,6 +1834,8 @@ class SettingsManager:
     def _user():
         """The account this process runs as — from the uid, not the environment,
         so the desktop app and the Decky plugin derive the same key."""
+        if sys.platform == 'win32':
+            return os.getlogin()
         try:
             import pwd
             return pwd.getpwuid(os.getuid()).pw_name
@@ -1845,6 +1850,11 @@ class SettingsManager:
         for name in ('LOGNAME', 'USER', 'LNAME', 'USERNAME'):
             if os.environ.get(name):
                 return os.environ[name]
+        if sys.platform == 'win32':
+            # getlogin is available on Windows; importing pwd here would make
+            # encryption setup mistake a missing Unix module for cryptography
+            # being unavailable and fall back to plaintext storage.
+            return os.getlogin()
         import pwd
         return pwd.getpwuid(os.getuid()).pw_name
 
@@ -1894,7 +1904,7 @@ class SettingsManager:
     def load_settings(self):
         """Load settings from file"""
         if self.config_file.exists():
-            self.config.read(self.config_file)
+            read_settings(self.config, self.config_file)
             self._stamp()
             # Migrate settings from older versions
             self._migrate_settings()
@@ -1962,7 +1972,8 @@ class SettingsManager:
         text. Without a cipher they stay that way, but still owner-only.
         """
         try:
-            os.chmod(self.config_file, 0o600)
+            if sys.platform != 'win32':
+                os.chmod(self.config_file, 0o600)
         except OSError as e:
             logging.warning(f"could not restrict {self.config_file}: {e}")
         if not self.cipher or 'RomM' not in self.config:
@@ -2039,7 +2050,7 @@ class SettingsManager:
         # Save if any migrations were applied
         if modified:
             self.save_settings()
-            print(f"✅ Settings migrated to latest version")
+            print("Settings migrated to latest version")
     
     def save_settings(self):
         """Save settings to file.
@@ -2051,16 +2062,7 @@ class SettingsManager:
         parser, so a save can't interleave with another writer's mutation.
         """
         with SettingsManager._lock:
-            tmp = self.config_file.with_suffix('.ini.tmp')
-            # Created owner-only: it holds credentials, and replace() below
-            # makes this file's mode the mode of settings.ini.
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, 'w') as f:
-                self.config.write(f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.config_file)
+            write_settings(self.config, self.config_file)
             self._stamp()
     
     def get(self, section, key, fallback=''):
