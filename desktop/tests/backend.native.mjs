@@ -22,7 +22,7 @@ function fixtureEnvironment(root) {
     if (process.env[key]) env[key] = process.env[key];
   }
   for (const [folder, names] of [
-    ["home", ["HOME", "USERPROFILE"]], ["local", ["LOCALAPPDATA"]],
+    ["Kullanıcı İzmir 東京", ["HOME", "USERPROFILE"]], ["local", ["LOCALAPPDATA"]],
     ["roaming", ["APPDATA"]], ["temp", ["TMP", "TEMP", "TMPDIR"]],
     ["config", ["XDG_CONFIG_HOME"]], ["cache", ["XDG_CACHE_HOME"]], ["data", ["XDG_DATA_HOME"]],
   ]) {
@@ -105,6 +105,8 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
       return reply.result;
     };
     assert.equal((await rpc("get_profiles")).current, "default");
+    const firstConfig = await rpc("get_config");
+    assert.ok(firstConfig.rom_directory.includes("Kullanıcı İzmir 東京"));
     const created = await rpc("create_profile", "İzmir 東京");
     assert.equal(created.status, "reload", JSON.stringify(created));
     const reloaded = windowResult();
@@ -113,6 +115,9 @@ for (const mode of ["development", "packaged layout", "occupied port"]) {
     assert.equal(children.length, 2);
     assert.equal(children[0].exitCode, 0, "old backend exited gracefully before rebinding");
     assert.equal((await rpc("get_profiles")).current, created.id);
+    const profileConfig = await rpc("get_config");
+    assert.equal(profileConfig.rom_directory, firstConfig.rom_directory);
+    assert.ok(profileConfig.save_directory.includes(created.id));
     const quit = next(events, "quit");
     app.emit("window-all-closed");
     await quit;
