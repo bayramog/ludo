@@ -2096,7 +2096,8 @@ export function GameDetailPage() {
             ) : !isDownloaded ? (
               <GameActionButton variant="emphasized" focusRef={ctaRef} disabled={!!busy || downloading} onClick={() => { void doDownload(); }}
                 onHold={isMultiRegion ? openRegions : undefined}
-                okHint={isMultiRegion && !downloading ? 'Download (hold: regions)' : undefined}
+                okHint={isMultiRegion && !downloading ? 'Download' : undefined}
+                holdHint={isMultiRegion && !downloading ? 'Regions' : undefined}
                 progress={downloading ? (dlProg?.exact ?? dlPct ?? 0) : undefined}
                 label={downloading
                   ? (extracting ? `${dlProg?.message || 'Extracting…'}${dlPct != null ? ` ${padPct(dlPct)}%` : ''}`
@@ -2118,7 +2119,8 @@ export function GameDetailPage() {
                 <GameActionButton variant="emphasized" focusRef={ctaRef} disabled={!!busy || noEmulator}
                   onClick={() => doLaunch()}
                   onHold={isMultiRegion && !noEmulator ? openRegions : undefined}
-                  okHint={isMultiRegion && !noEmulator ? `${resumable ? 'Resume' : 'Play'} (hold: regions)` : undefined}
+                  okHint={isMultiRegion && !noEmulator ? (resumable ? 'Resume' : 'Play') : undefined}
+                  holdHint={isMultiRegion && !noEmulator ? 'Regions' : undefined}
                   onFocused={() => setCtaFocused(true)} onBlurred={() => setCtaFocused(false)}
                   onOptionsButton={isMultiDisc && !noEmulator ? openDiscMenu : undefined}
                   optionsHint={isMultiDisc && !noEmulator}

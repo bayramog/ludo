@@ -82,6 +82,7 @@ export const Focusable = forwardRef(function Focusable(
     // Destructured out so they don't leak onto the DOM as unknown attributes;
     // registered with the gamepad layer below.
     onOKActionDescription,
+    onOKHoldActionDescription,
     onSecondaryActionDescription,
     onOptionsActionDescription,
     // Steam layout hint with no web equivalent — drop it so React doesn't warn
@@ -102,6 +103,7 @@ export const Focusable = forwardRef(function Focusable(
   const descRef = useRef({});
   descRef.current = {
     ok: onOKActionDescription,
+    okHold: onOKHoldActionDescription,
     secondary: onSecondaryActionDescription,
     options: onOptionsActionDescription,
     activatable: !!(onActivate ?? onClick),

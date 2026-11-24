@@ -8,7 +8,7 @@
 // re-deriving what a focusable thing has to do.
 
 import { useState, useEffect, useRef, forwardRef, type Ref, ChangeEvent} from "react";
-import { Focusable, TextField, GamepadButton, ModalRoot, useKeyboardBumpers} from "@ludo/host";
+import { Focusable, TextField, GamepadButton, ModalRoot, useKeyboardBumpers, host} from "@ludo/host";
 import { V2, fmtBytes, formatEta, formatSpeed } from "./theme";
 import { V2Focus, V2_FOCUS_STYLE} from "./focus";
 import { _forceGamepadFocus, _summonVirtualKeyboard, _dismissVirtualKeyboard } from "./shell";
@@ -476,6 +476,15 @@ export function V2Button({ children, onClick, variant = 'tonal', color, disabled
 //     primary Download (overlay-emphasis tokens).
 //   • surface, icon-only  → circular translucent-grey glass button matching the
 //     page background (RTag tokens); used for Delete / secondary actions.
+// Bottom-bar labels for A and for holding it. The desktop bar draws the hold
+// as its own "Hold [A] Regions" hint; Steam's bar on the Deck has no slot for
+// it, so there it rides along in A's label.
+export function okHints(ok?: string, hold?: string): Record<string, string | undefined> {
+  if (!hold) return { onOKActionDescription: ok };
+  if (host.name === 'desktop') return { onOKActionDescription: ok, onOKHoldActionDescription: hold };
+  return { onOKActionDescription: ok ? `${ok} (hold: ${hold.toLowerCase()})` : undefined };
+}
+
 // Tap-or-hold on A / Enter: a hold (500ms) runs onHold, a shorter press runs
 // onTap on release. Steam's onActivate fires on the PRESS edge, so with a hold
 // action the tap has to wait for the release instead; onActivate returns true
@@ -523,7 +532,7 @@ export function useHoldPress(onHold: (() => void) | undefined, onTap: () => void
 // `danger` is a filled-danger pill for the delete-confirm step. Pill radius
 // throughout; controller focus paints a brand ring + slight scale.
 export function GameActionButton({ icon, label, onClick, variant = 'surface', accent, disabled, progress, progressColor,
-  onOptionsButton, optionsHint, focusRef, onFocused, onBlurred, onHold, okHint }:
+  onOptionsButton, optionsHint, focusRef, onFocused, onBlurred, onHold, okHint, holdHint }:
   {
     icon: any; label?: string; onClick: () => void;
     variant?: 'emphasized' | 'surface' | 'danger'; accent?: 'danger'; disabled?: boolean;
@@ -531,8 +540,8 @@ export function GameActionButton({ icon, label, onClick, variant = 'surface', ac
     focusRef?: React.MutableRefObject<any>;
     onFocused?: () => void; onBlurred?: () => void;
     // Holding A / Enter does this instead of onClick (a tap still clicks);
-    // okHint is the bottom bar's label for A, e.g. "Download (hold: regions)".
-    onHold?: () => void; okHint?: string;
+    // okHint / holdHint label A and holding it in the bottom bar (okHints).
+    onHold?: () => void; okHint?: string; holdHint?: string;
   }) {
   const [active, setActive] = useState(false);
   const hold = useHoldPress(onHold && !disabled ? onHold : undefined, () => !disabled && onClick());
@@ -601,7 +610,7 @@ export function GameActionButton({ icon, label, onClick, variant = 'surface', ac
       onActivate={(e: any) => { if (!hold.onActivate(e)) { if (!disabled) onClick(); } }}
       onClick={() => !disabled && onClick()}
       onButtonDown={hold.onButtonDown} onButtonUp={hold.onButtonUp}
-      onOKActionDescription={okHint}
+      {...okHints(okHint, holdHint)}
       onOptionsButton={onOptionsButton ? () => !disabled && onOptionsButton() : undefined}
       onOptionsActionDescription={onOptionsButton ? 'Select disc' : undefined}
       onFocus={() => { setActive(true); onFocused?.(); }} onBlur={() => { setActive(false); onBlurred?.(); }}
