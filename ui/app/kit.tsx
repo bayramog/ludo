@@ -276,7 +276,7 @@ export function PlatformIcon({ slug, fsSlug, size, onTone }: { slug?: string | n
 // becomes a solid red fill with light text, so a half-pressed destructive row
 // reads as live at a glance rather than as another idle menu entry.
 export function UserMenuRow({ icon, label, danger, armed, disabled, onSelect, trailing }:
-  { icon: any; label: string; danger?: boolean; armed?: boolean; disabled?: boolean; onSelect: () => void; trailing?: any }) {
+  { icon: any; label: any; danger?: boolean; armed?: boolean; disabled?: boolean; onSelect: () => void; trailing?: any }) {
   const [hot, setHot] = useState(false);
   const fg = disabled ? V2.fgFaint : (armed ? '#fff' : (danger ? V2.danger : V2.fg));
   const bg = armed
@@ -1330,7 +1330,7 @@ export function PickerModal({ title, message, children, items, onDismiss, closeM
   children?: any;
   // keepOpen: the row acts inside the modal (e.g. retry) instead of closing it.
   // icon replaces the active check; trailing sits after the label.
-  items: { key: string | number; label: string; active?: boolean; danger?: boolean; keepOpen?: boolean;
+  items: { key: string | number; label: any; active?: boolean; danger?: boolean; keepOpen?: boolean;
     icon?: any; trailing?: any; onSelect: () => void }[];
   onDismiss?: () => void;
   closeModal?: () => void;

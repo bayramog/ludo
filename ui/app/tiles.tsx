@@ -260,6 +260,24 @@ export function versionTags(file?: string): string {
   return [asRegion(groups[region]), ...groups.filter((_, i) => i !== region)].join(' · ');
 }
 
+// versionTags split for display: the region's flags and name, the language
+// flags of a group like "(En,Fr,De)", and whatever else ("Rev 1", "Disc 1").
+export function versionParts(file?: string): { flags: string[]; region: string; langs: string[]; rest: string[] } {
+  const groups = [...(file || '').matchAll(/\(([^)]+)\)/g)].map((m) => m[1].trim()).filter(Boolean);
+  const out = { flags: [] as string[], region: '', langs: [] as string[], rest: [] as string[] };
+  for (const g of groups) {
+    const items = g.split(',').map((x) => x.trim()).filter(Boolean);
+    const names = items.map(regionName);
+    if (!out.region && names.every(Boolean)) {
+      out.region = names.join(', ');
+      out.flags = items.map(regionToEmoji);
+    } else if (!out.langs.length && items.every((x) => x.length === 2 && x.toLowerCase() in LANGUAGE_EMOJI)) {
+      out.langs = items.map(languageToEmoji);
+    } else out.rest.push(g);
+  }
+  return out;
+}
+
 export function openRegionPicker(
   romId: number, gameName: string,
   siblings: { rom_id: number; name: string; fs_name_no_ext?: string; fs_extension?: string }[],
@@ -293,25 +311,41 @@ export function openRegionPicker(
   const baseClash = (e: typeof all[number]) => !!e.ext && bases.indexOf(base(e)) !== bases.lastIndexOf(base(e));
 
   // What tells versions apart is the tags in their file names: "(Italy)",
-  // "(Europe) (En,Fr,De)", "(Rev 1)". The title is the fallback, for files
-  // without tags or two versions whose tags are the same.
+  // "(Europe) (En,Fr,De)", "(Rev 1)", shown as flags and a region name. When
+  // two versions carry the same tags (one game as .bin and as .chd), the
+  // format follows; the title is the fallback for files with no tags at all.
   const tagsOf = (e: typeof all[number]) => versionTags(e.file);
   const tags = all.map(tagsOf);
-  const tagClash = (t: string) => !t || tags.indexOf(t) !== tags.lastIndexOf(t);
-  const nameOf = (e: typeof all[number]) => {
+  const tagClash = (t: string) => tags.indexOf(t) !== tags.lastIndexOf(t);
+  const tagExt = (e: typeof all[number]) => tagsOf(e) + '|' + (e.ext || '');
+  const tagExts = all.map(tagExt);
+  const flagStyle = { fontFamily: EMOJI_FONT, letterSpacing: '2px' };
+  const nameOf = (e: typeof all[number]): any => {
     const t = tagsOf(e);
     const plain = base(e) + (baseClash(e) ? ` (.${e.ext})` : '');
-    return tagClash(t) ? plain : t;
+    if (!t || tagExts.indexOf(tagExt(e)) !== tagExts.lastIndexOf(tagExt(e))) return plain;
+    const p = versionParts(e.file);
+    const text = [p.region, ...p.rest].filter(Boolean).join(' · ')
+      + (tagClash(t) && e.ext ? ` · .${e.ext}` : '');
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+        {p.flags.length > 0 && <span style={flagStyle}>{p.flags.join('')}</span>}
+        <span>{text}</span>
+        {p.langs.length > 0 && <span style={{ ...flagStyle, fontSize: '12px', opacity: 0.85 }}>{p.langs.join('')}</span>}
+      </span>
+    );
   };
+  const statusOf = (id: number) => (noFile(id) ? 'no file' : !onDisk(id) ? 'not downloaded' : '');
 
   const onDisk = (id: number) => (id === romId ? !!mainDownloaded : downloadedIds.has(id));
 
   showModal(
     <PickerModal title="Select region" items={all.map((entry) => ({
       key: entry.rom_id,
-      label: nameOf(entry)
-        + (noFile(entry.rom_id) ? ' (no file)'
-          : !onDisk(entry.rom_id) ? ' (not downloaded)' : ''),
+      label: <>
+        {nameOf(entry)}
+        {statusOf(entry.rom_id) && <span style={{ color: V2.fgMuted, marginLeft: '6px' }}>({statusOf(entry.rom_id)})</span>}
+      </>,
       // On disk, to download, or not downloadable: the icon says it before the
       // text does. The version last played says so after its name.
       icon: noFile(entry.rom_id) ? <FaBan size={13} style={{ color: V2.fgFaint }} />
