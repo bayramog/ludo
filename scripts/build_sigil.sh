@@ -64,8 +64,15 @@ cp "$LIB" "$BUILD_DIR/libsigil.so"
 # the Decky zip and the desktop app carry romm_sync_engine wholesale, so a file
 # there reaches users without either build script changing. title_ids finds it
 # with no env var set. See engine/romm_sync_engine/bin/README.md.
+#
+# x86-64 keeps the original bin/libsigil.so; every other arch gets its own
+# subdirectory (bin/aarch64/libsigil.so), which title_ids tries first on that
+# arch. Run this once per arch, on that arch, and commit each result.
 BUNDLE_DIR="$REPO_ROOT/engine/romm_sync_engine/bin"
 if [ -d "$BUNDLE_DIR" ]; then
+  ARCH="$(uname -m)"
+  [ "$ARCH" = x86_64 ] || BUNDLE_DIR="$BUNDLE_DIR/$ARCH"
+  mkdir -p "$BUNDLE_DIR"
   cp "$BUILD_DIR/libsigil.so" "$BUNDLE_DIR/libsigil.so"
   echo "==> installed into $BUNDLE_DIR/libsigil.so"
 fi

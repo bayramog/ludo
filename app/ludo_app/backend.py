@@ -606,6 +606,30 @@ def _version_key(v):
     return (core_t, (0, tuple(ids)))
 
 
+# ELF e_machine values for the architectures an AppImage is built for.
+_ELF_MACHINES = {0x3E: 'x86_64', 0xB7: 'aarch64'}
+
+
+def _elf_arch_mismatch(header: bytes):
+    """Why an ELF header can't run on this machine, or None if it can.
+
+    Reads e_machine (bytes 18-19, in the byte order EI_DATA names). Anything
+    this can't judge, such as an unknown machine or a short header, is let
+    through: this guards against a wrong-arch update, not every bad file.
+    """
+    import platform
+    if len(header) < 20:
+        return None
+    order = 'little' if header[5] == 1 else 'big'
+    built_for = _ELF_MACHINES.get(int.from_bytes(header[18:20], order))
+    here = platform.machine().lower()
+    here = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(here, here)
+    if built_for and here in _ELF_MACHINES.values() and built_for != here:
+        return (f'Downloaded AppImage is built for {built_for}, '
+                f'but this machine is {here}')
+    return None
+
+
 def _release_asset(rel, suffix):
     """First asset on `rel` whose name ends with `suffix`, or None."""
     return next((a for a in (rel.get('assets') or [])
@@ -5937,11 +5961,16 @@ class LudoBackend:
 
             # Sanity-check before clobbering a working install: an AppImage is
             # an ELF binary, and a truncated download or an HTML error page
-            # would leave the app unlaunchable.
+            # would leave the app unlaunchable. So would an AppImage for the
+            # wrong CPU, now that one is built per architecture.
             with open(src, 'rb') as f:
-                if f.read(4) != b'\x7fELF':
-                    return {'success': False,
-                            'message': 'Downloaded file is not a valid AppImage'}
+                header = f.read(20)
+            if header[:4] != b'\x7fELF':
+                return {'success': False,
+                        'message': 'Downloaded file is not a valid AppImage'}
+            wrong_arch = _elf_arch_mismatch(header)
+            if wrong_arch:
+                return {'success': False, 'message': wrong_arch}
             os.chmod(src, 0o755)
 
             # Move the download onto the target rather than copying it: the
