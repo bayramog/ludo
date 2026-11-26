@@ -45,6 +45,7 @@ from .release_token import release_token
 from romm_sync_engine import paths as _paths  # noqa: E402
 from romm_sync_engine import events as _events  # noqa: E402
 from romm_sync_engine import profiles as _profiles  # noqa: E402
+from romm_sync_engine.platform_extensions import extensions_for  # noqa: E402
 _paths.set_app_id("ludo")
 _paths.set_client_name("Ludo")
 # Downloads, covers and generated icons go under ~/Ludo rather than the GTK
@@ -416,6 +417,29 @@ _DISC_IMAGE_EXTS = ('.cue', '.bin', '.iso', '.chd', '.gdi', '.cdi',
 _DISC_DESCRIPTOR_EXTS = ('.cue', '.gdi', '.ccd', '.nrg')
 
 
+def _prefer_platform_games(games, folder, platform_slug):
+    """Narrow a folder's candidate games to the platform's own ROM files.
+
+    A homebrew release zip can carry its build kit beside the game -- Apotris
+    ships Apotris.gba with tools/Apotris-base.gba, Linux binaries, .exe tools
+    and .wav samples -- and every one of those is a "standalone game" to the
+    generic filter, so the first by name (tools/ape.aarch64) was booted. Keep
+    the files whose extension the platform's cores take, then the ones at the
+    top of the folder, as Argosy picks (findPrimaryRomInFolder). Unknown
+    platform, or nothing matching: the list is returned unchanged. Without a
+    slug the platform is read off the folder a download lands in
+    ("<roms>/gba/<game>/"), which is a RomM slug or an ES-DE folder name.
+    """
+    exts = extensions_for(platform_slug or folder.parent.name)
+    if not exts or not games:
+        return games
+    own = [f for f in games if f.suffix.lower() in exts]
+    if not own:
+        return games
+    top = [f for f in own if f.parent == folder]
+    return top or own
+
+
 def _list_standalone_games(folder):
     """Return the standalone game files inside a folder (regional/multi-file ROM).
 
@@ -548,7 +572,7 @@ def _detect_multi_disc(local_path, is_downloaded):
         if len(launchable) > 1:
             return True, len(launchable)
         # No disc set — fall back to standalone game files (regional variants).
-        games = _list_standalone_games(p)
+        games = _prefer_platform_games(_list_standalone_games(p), p, None)
         # Except on Switch, where several containers in a folder are a game
         # plus its update and DLC. Those are not variants to pick between —
         # only the base boots — so the badge and the picker must not appear.
@@ -605,6 +629,30 @@ def _version_key(v):
         else:
             ids.append((1, 0, x))
     return (core_t, (0, tuple(ids)))
+
+
+# ELF e_machine values for the architectures an AppImage is built for.
+_ELF_MACHINES = {0x3E: 'x86_64', 0xB7: 'aarch64'}
+
+
+def _elf_arch_mismatch(header: bytes):
+    """Why an ELF header can't run on this machine, or None if it can.
+
+    Reads e_machine (bytes 18-19, in the byte order EI_DATA names). Anything
+    this can't judge, such as an unknown machine or a short header, is let
+    through: this guards against a wrong-arch update, not every bad file.
+    """
+    import platform
+    if len(header) < 20:
+        return None
+    order = 'little' if header[5] == 1 else 'big'
+    built_for = _ELF_MACHINES.get(int.from_bytes(header[18:20], order))
+    here = platform.machine().lower()
+    here = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(here, here)
+    if built_for and here in _ELF_MACHINES.values() and built_for != here:
+        return (f'Downloaded AppImage is built for {built_for}, '
+                f'but this machine is {here}')
+    return None
 
 
 def _release_asset(rel, suffix):
@@ -5938,11 +5986,16 @@ class LudoBackend:
 
             # Sanity-check before clobbering a working install: an AppImage is
             # an ELF binary, and a truncated download or an HTML error page
-            # would leave the app unlaunchable.
+            # would leave the app unlaunchable. So would an AppImage for the
+            # wrong CPU, now that one is built per architecture.
             with open(src, 'rb') as f:
-                if f.read(4) != b'\x7fELF':
-                    return {'success': False,
-                            'message': 'Downloaded file is not a valid AppImage'}
+                header = f.read(20)
+            if header[:4] != b'\x7fELF':
+                return {'success': False,
+                        'message': 'Downloaded file is not a valid AppImage'}
+            wrong_arch = _elf_arch_mismatch(header)
+            if wrong_arch:
+                return {'success': False, 'message': wrong_arch}
             os.chmod(src, 0o755)
 
             # Move the download onto the target rather than copying it: the
@@ -8601,7 +8654,7 @@ class LudoBackend:
         except Exception:
             return None
 
-    def _list_local_discs(self, local_path):
+    def _list_local_discs(self, local_path, platform_slug=None):
         """Return launchable entries inside a downloaded multi-file folder.
 
         Each entry: {name, path, is_m3u, is_region}. Returns [] for a single-file
@@ -8631,7 +8684,7 @@ class LudoBackend:
             # and surface the standalone game files instead of the stray .m3u.
             disc_images = [d for d in discs if not d['is_m3u']]
             if len(disc_images) < 2:
-                games = _list_standalone_games(p)
+                games = _prefer_platform_games(_list_standalone_games(p), p, platform_slug)
                 # Switch first: several .nsp/.xci in one folder is a game plus
                 # its update and DLC, not a set of regional variants. Only the
                 # base can boot, so there is one entry and no picker — the
@@ -8692,7 +8745,7 @@ class LudoBackend:
         if p.is_dir() and str(platform_slug or '').lower() in WIIU_SLUGS:
             target, _root = resolve_wiiu_rom(p)
             return str(target) if target.is_file() else None
-        discs = self._list_local_discs(local_path)
+        discs = self._list_local_discs(local_path, platform_slug)
         if not discs:
             return None
         if disc:
@@ -8783,7 +8836,7 @@ class LudoBackend:
             if str(g.get('platform_slug') or '').lower() in WIIU_SLUGS:
                 # One launch file per Wii U title; there is nothing to pick.
                 return {'success': True, 'discs': [], 'last': ''}
-            discs = self._list_local_discs(g['local_path'])
+            discs = self._list_local_discs(g['local_path'], g.get('platform_slug'))
             last = self._get_last_disc(rom_id)
             # Drop a stale remembered name if that disc no longer exists.
             if last and not any(d['name'] == last for d in discs):

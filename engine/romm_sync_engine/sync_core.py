@@ -6787,15 +6787,17 @@ class RomMClient:
                             # same upload — forever.
                             #
                             # Our stem must still prefix whatever comes back,
-                            # AND the stamp the server appends must be from
-                            # this moment. The prefix alone stopped being proof
-                            # once we stopped sending a timestamp of our own:
-                            # an echoed old record has the same stem as the file
-                            # we just sent, and only its stamp gives it away.
-                            stale = _server_stamp_age(server_filename)
-                            if stale is not None and stale > 120:
+                            # AND the record must be from this moment. The
+                            # prefix alone stopped being proof once we stopped
+                            # sending a timestamp of our own: an echoed old
+                            # record has the same stem as the file we just
+                            # sent, and only its age (created_at, else the
+                            # stamp the server appends) gives it away.
+                            stale = _stale_upload_echo(
+                                server_filename, response_data.get('created_at'))
+                            if stale is not None:
                                 logging.warning(
-                                    f"Upload echoed a record stamped {stale:.0f}s ago "
+                                    f"Upload echoed a record stored {stale:.0f}s ago "
                                     f"(sent {romm_filename!r}, got id={file_id} "
                                     f"{server_filename!r}) — treating as a conflict")
                                 return False if overwrite else 'conflict'
@@ -11185,7 +11187,8 @@ class RetroArchInterface:
             Path('/usr/lib64/libretro'),
             Path('/usr/local/lib/libretro'),
             Path('/usr/lib/x86_64-linux-gnu/libretro'),
-            
+            Path('/usr/lib/aarch64-linux-gnu/libretro'),
+
             # Steam installations
             Path.home() / '.steam/steam/steamapps/common/RetroArch/cores',
             Path.home() / '.local/share/Steam/steamapps/common/RetroArch/cores',
@@ -19750,34 +19753,75 @@ _VMU_SAVE_RE = re.compile(r'\.[A-D][1-2]\.bin$', re.IGNORECASE)
 
 
 # The version stamp RomM appends to every save it accepts: "[2026-08-03_22-20-51]",
-# always UTC and always last in the name.
+# or "[2026-08-03_22-20-51-351]" from 5.5 on, always last in the name, in the server's LOCAL time (RomM formats
+# datetime.now() with no zone), so the stamp alone does not say when it was.
 # Trailing extensions, plural: RetroArch's auto-savestate really is
 # "X [stamp].state.auto".
 _SERVER_STAMP_RE = re.compile(
-    r'\[(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\](?=(?:\.[^.\s]+)*$)')
+    r'\[(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})(?:-\d{3})?\](?=(?:\.[^.\s]+)*$)')
+
+# How far from now a record the server just stored may be stamped.
+_FRESH_UPLOAD_SECONDS = 120
+
+# Every UTC offset in use falls between -12:00 and +14:00 on a quarter hour
+# (India's +5:30, Nepal's +5:45, the Chathams' +12:45).
+_UTC_OFFSETS = tuple(datetime.timedelta(minutes=m)
+                     for m in range(-12 * 60, 14 * 60 + 1, 15))
 
 
-def _server_stamp_age(server_filename):
-    """Seconds since RomM stamped this filename, or None if it carries no stamp.
+def _aware_timestamp(value):
+    """``value`` (ISO 8601) as an aware datetime, or None without a zone."""
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _stale_upload_echo(server_filename, created_at=None):
+    """Seconds since the server stored this record when that is too long ago
+    for it to be the upload just sent, else None.
 
     Lets an upload tell "the server stored my bytes" from "the server deduped
-    into an older record and echoed it back" — the latter answers 200 with a
+    into an older record and echoed it back" -- the latter answers 200 with a
     name that has the right stem but a stamp from whenever that record was made.
-    None (no stamp at all) is not treated as failure: an older or differently
+    None also when the name carries no stamp: an older or differently
     configured server may not stamp, and refusing those would break uploads.
+    An unstamped name also stays the same record when re-uploaded, so its
+    ``created_at`` is legitimately old and is not consulted.
+
+    ``created_at`` (RomM serialises it in ISO 8601 with its offset) decides
+    when it carries a zone: it is exact, and RomM sets it only when it creates
+    the record. Promoting an older version to the head of its slot moves
+    ``updated_at``, never ``created_at``.
+
+    Otherwise the stamp decides. It is the server's local time and its zone is
+    unknown, so it counts as fresh when it is within _FRESH_UPLOAD_SECONDS of
+    now in ANY UTC offset. The trade-off: an echoed record up to about 12 hours
+    old whose age happens to land within that margin of a whole quarter hour
+    passes as fresh. A record older than every offset allows -- the usual
+    echo, made days ago -- is still caught.
     """
     m = None
     for m in _SERVER_STAMP_RE.finditer(str(server_filename)):
         pass
     if not m:
         return None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    created = _aware_timestamp(created_at) if created_at else None
+    if created is not None:
+        age = (now - created).total_seconds()
+        return age if age > _FRESH_UPLOAD_SECONDS else None
     try:
         stamped = datetime.datetime.strptime(
             f"{m.group(1)} {m.group(2)}", "%Y-%m-%d %H-%M-%S").replace(
                 tzinfo=datetime.timezone.utc)
     except ValueError:
         return None
-    return (datetime.datetime.now(datetime.timezone.utc) - stamped).total_seconds()
+    # Its age read as UTC; read as local time at UTC+X, it is X older.
+    as_utc = (now - stamped).total_seconds()
+    age = min((as_utc + off.total_seconds() for off in _UTC_OFFSETS), key=abs)
+    return age if abs(age) > _FRESH_UPLOAD_SECONDS else None
 
 
 def _is_vmu_save(path):
